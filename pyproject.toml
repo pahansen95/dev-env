@@ -2,12 +2,13 @@
 name = "dev-env"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = [
-    "click>=8.2.1",
-    "docker>=7.1.0",
-    "pydantic>=2.11.5",
-    "rich>=14.0.0",
-]
+dependencies = []
+description = "Zero-dependency development environment management tool"
+readme = "README.md"
+license = {text = "MIT"}
+
+[project.scripts]
+dev-env = "dev_env.cli:main"
 
 [dependency-groups]
 dev = [
