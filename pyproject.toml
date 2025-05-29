@@ -39,3 +39,28 @@ ignore = ["E501"]
 # Group imports like YAPF: standard library → third-party → local
 section-order = ["standard-library", "third-party", "local-folder"]
 combine-as-imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--verbose",
+    "--tb=short",
+    "--strict-markers",
+    "--disable-warnings",
+    "--cov=src/dev_env",
+    "--cov-report=term-missing",
+    "--cov-report=html:htmlcov",
+    "--cov-fail-under=85"
+]
+markers = [
+    "slow: marks tests as slow (may require Docker)",
+    "integration: marks tests as integration tests", 
+    "unit: marks tests as unit tests"
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning"
+]

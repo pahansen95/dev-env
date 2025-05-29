@@ -4,44 +4,67 @@
 
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Source shared utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./utils.sh
+source "${SCRIPT_DIR}/utils.sh"
 
 # Get the project root using git
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
-    echo -e "${RED}Error: Not in a git repository${NC}"
+PROJECT_ROOT="$(get_project_root)" || {
+    log_error "Not in a git repository"
     exit 1
 }
 
 # Default targets
 DEFAULT_TARGETS=("src" "tests" "examples" "helpers")
 
+# Help text
+show_help() {
+    cat << EOF
+Usage: $0 [FILES_OR_DIRECTORIES...]
+
+Apply ruff formatting and linting to Python files in the project.
+
+Arguments:
+  FILES_OR_DIRECTORIES  Files or directories to process (default: src tests examples helpers)
+
+Options:
+  -h, --help           Show this help message
+
+Examples:
+  $0                   Process default directories (src, tests, examples, helpers)
+  $0 src/dev_env       Process only the src/dev_env directory
+  $0 file.py           Process a specific file
+EOF
+}
+
 # Parse command line arguments
+if [[ "${1:-}" == "-h" ]] || [[ "${1:-}" == "--help" ]]; then
+    show_help
+    exit 0
+fi
+
 if [ $# -eq 0 ]; then
     ARGS=("${DEFAULT_TARGETS[@]}")
 else
     ARGS=("$@")
 fi
 
-echo "Project root: $PROJECT_ROOT"
-echo "Processing: ${ARGS[*]}"
-echo
+start_timer "style_enforcement"
+
+log_info "Project root: $PROJECT_ROOT"
+log_info "Processing: ${ARGS[*]}"
 
 # Check if ruff is available
-if ! command -v ruff &> /dev/null; then
-    echo -e "${RED}Error: ruff is not installed${NC}"
-    echo "Install it with: pip install ruff"
+if ! require_command "ruff" "pip install ruff"; then
     exit 1
 fi
 
 # Create a temporary directory for symlinks
 TEMP_DIR=$(mktemp -d)
-trap "rm -rf $TEMP_DIR" EXIT
+set_exit_handler "rm -rf $TEMP_DIR"
 
-echo "Creating symlinks in temporary directory..."
+log_debug "Creating symlinks in temporary directory: $TEMP_DIR"
 
 # Process arguments - can be mix of files and directories
 file_count=0
@@ -55,7 +78,7 @@ for arg in "${ARGS[@]}"; do
     fi
     
     if [ ! -e "$path" ]; then
-        echo -e "${YELLOW}Skipping $arg - not found${NC}"
+        log_warning "Skipping $arg - not found"
         continue
     fi
     
@@ -96,20 +119,19 @@ for arg in "${ARGS[@]}"; do
 done
 
 if [ $file_count -eq 0 ]; then
-    echo -e "${YELLOW}No Python files found in specified targets${NC}"
+    log_warning "No Python files found in specified targets"
     exit 0
 fi
 
-echo "Found $file_count Python files"
-echo
+log_info "Found $file_count Python files"
 
 # Run ruff check with --fix on the entire temp directory
-echo -e "${GREEN}Checking and fixing all files with ruff...${NC}"
+log_info "Checking and fixing all files with ruff..."
 if ruff check --fix --verbose "$TEMP_DIR"; then
-    echo "✓ Linting complete"
+    log_success "Linting complete"
     lint_success=true
 else
-    echo -e "${YELLOW}⚠ Some linting issues remain (manual fixes needed)${NC}"
+    log_warning "Some linting issues remain (manual fixes needed)"
     # Show remaining issues
     echo
     echo "Remaining issues:"
@@ -120,12 +142,12 @@ fi
 echo
 
 # Run ruff format on the entire temp directory
-echo -e "${GREEN}Formatting all files with ruff...${NC}"
+log_info "Formatting all files with ruff..."
 if ruff format --verbose "$TEMP_DIR"; then
-    echo "✓ Formatting complete"
+    log_success "Formatting complete"
     format_success=true
 else
-    echo -e "${RED}✗ Formatting failed${NC}"
+    log_error "Formatting failed"
     format_success=false
 fi
 
@@ -134,15 +156,18 @@ echo "================================"
 
 # Final exit status
 if [ "$format_success" = true ] && [ "$lint_success" = true ]; then
-    echo -e "${GREEN}✓ PASS: Style enforcement complete!${NC}"
-    echo "Successfully processed $file_count files"
+    log_timer "style_enforcement"
+    log_success "Style enforcement complete!"
+    log_info "Successfully processed $file_count files"
     exit 0
 elif [ "$format_success" = false ]; then
-    echo -e "${RED}✗ ERROR: Formatting failed${NC}"
-    echo "Failed to process $file_count files"
+    log_timer "style_enforcement"
+    log_error "Formatting failed"
+    log_info "Failed to process $file_count files"
     exit 1
 else
-    echo -e "${YELLOW}⚠ PASS with warnings: Style enforcement complete with remaining lint issues${NC}"
-    echo "Processed $file_count files (manual fixes needed for some lint issues)"
+    log_timer "style_enforcement"
+    log_warning "Style enforcement complete with remaining lint issues"
+    log_info "Processed $file_count files (manual fixes needed for some lint issues)"
     exit 0
 fi

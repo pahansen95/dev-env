@@ -4,32 +4,28 @@
 
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Source shared utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./utils.sh
+source "${SCRIPT_DIR}/utils.sh"
 
 # Configuration
 VENV_DIR="${VENV_DIR:-.venv}"
 DEFAULT_PYTHON_VERSION="3.13"
 
-# Helper functions
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
+# Help text
+show_help() {
+    cat << EOF
+Usage: $0 [OPTIONS]
 
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+Options:
+  -q, --quiet      Suppress informational output
+  --skip-venv      Skip virtual environment creation
+  --force          Force recreate virtual environment
+  --no-deps        Skip dependency installation
+  --sync-only      Only sync existing dependencies (no new installs)
+  -h, --help       Show this help message
+EOF
 }
 
 # Parse command line arguments
@@ -43,6 +39,7 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         -q|--quiet)
             QUIET_MODE=true
+            HELPERS_UTILS_QUIET=true
             shift
             ;;
         --skip-venv)
@@ -62,19 +59,12 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo "Usage: $0 [OPTIONS]"
-            echo
-            echo "Options:"
-            echo "  -q, --quiet      Suppress informational output"
-            echo "  --skip-venv      Skip virtual environment creation"
-            echo "  --force          Force recreate virtual environment"
-            echo "  --no-deps        Skip dependency installation"
-            echo "  --sync-only      Only sync existing dependencies (no new installs)"
-            echo "  -h, --help       Show this help message"
+            show_help
             exit 0
             ;;
         *)
             log_error "Unknown option: $1"
+            show_help
             exit 1
             ;;
     esac
@@ -84,11 +74,11 @@ done
 check_dependencies() {
     local missing_deps=()
     
-    if ! command -v pyenv >/dev/null 2>&1; then
+    if ! command_exists pyenv; then
         missing_deps+=("pyenv")
     fi
     
-    if ! command -v uv >/dev/null 2>&1; then
+    if ! command_exists uv; then
         missing_deps+=("uv")
     fi
     
@@ -105,7 +95,7 @@ check_dependencies() {
 }
 
 # Get project root
-get_project_root() {
+get_project_root_alt() {
     if git rev-parse --git-dir >/dev/null 2>&1; then
         git rev-parse --show-toplevel
     else
@@ -257,6 +247,8 @@ install_dependencies() {
 
 # Main execution
 main() {
+    start_timer "python_setup"
+    
     if [ "$QUIET_MODE" = false ]; then
         echo
         echo "========================================"
@@ -271,7 +263,7 @@ main() {
     fi
     
     # Get project root
-    PROJECT_ROOT=$(get_project_root) || exit 1
+    PROJECT_ROOT=$(get_project_root_alt) || exit 1
     log_info "Project root: $PROJECT_ROOT"
     
     # Setup Python version
@@ -288,6 +280,7 @@ main() {
     # Final message
     if [ "$SKIP_VENV" = false ]; then
         echo
+        log_timer "python_setup"
         log_success "Python environment setup complete!"
         echo "Activate the virtual environment with:"
         echo "  source $VENV_DIR/bin/activate"
@@ -301,4 +294,4 @@ main() {
 }
 
 # Run main function
-main
+main "$@"
