@@ -9,15 +9,28 @@ from . import __version__
 from .docker import DockerClient
 from .config import load_environment
 from .state import StateManager
-from .utils import check_docker_available, generate_container_name
+from .utils import (
+  check_docker_available,
+  generate_container_name,
+  validate_port_mappings,
+  validate_bind_mounts,
+  DevEnvError,
+  DockerNotAvailableError,
+  EnvironmentExistsError,
+  EnvironmentNotFoundError,
+  ContainerNotRunningError,
+  ImagePullError,
+  SSHNotEnabledError,
+)
 
 
 def cmd_up(args: argparse.Namespace) -> int:
   """Start a development environment"""
   # Check Docker availability
   if not check_docker_available():
-    print("Error: Docker daemon is not accessible", file=sys.stderr)
-    return 1
+    error = DockerNotAvailableError()
+    print(error.format_error(), file=sys.stderr)
+    return error.exit_code
 
   # Load configuration
   try:
@@ -32,8 +45,34 @@ def cmd_up(args: argparse.Namespace) -> int:
   # Check if environment already exists
   env_name = args.name or env.name
   if state.get_environment(env_name):
-    print(f"Environment '{env_name}' already exists", file=sys.stderr)
-    return 1
+    error = EnvironmentExistsError(env_name)
+    print(error.format_error(), file=sys.stderr)
+    return error.exit_code
+
+  # Validate configuration before proceeding
+  warnings = []
+
+  # Validate port mappings
+  if env.ports:
+    port_warnings = validate_port_mappings(env.ports)
+    warnings.extend(port_warnings)
+
+  # Validate bind mounts
+  if env.volumes:
+    mount_warnings = validate_bind_mounts(env.volumes)
+    warnings.extend(mount_warnings)
+
+  # Show warnings to user
+  if warnings:
+    print("⚠️  Configuration warnings:")
+    for warning in warnings:
+      print(f"  - {warning}")
+
+    # Ask user if they want to continue
+    response = input("\nContinue anyway? [y/N]: ").strip().lower()
+    if response not in ["y", "yes"]:
+      print("Aborted by user")
+      return 1
 
   # Create Docker client
   docker = DockerClient()
@@ -44,21 +83,58 @@ def cmd_up(args: argparse.Namespace) -> int:
 
     print(f"Creating environment '{env_name}'...")
 
+    # Pull image if needed
+    def progress_callback(status: str, progress: float):
+      print(f"    {status}: {progress:.1f}%")
+
+    print(f"  [1/6] Pulling image: {env.base_image}")
+    try:
+      docker.pull_image(env.base_image, progress_callback)
+    except Exception as e:
+      # Check if image exists locally before failing
+      try:
+        docker._request("GET", f"/images/{env.base_image}/json")
+        print(f"    Warning: Pull failed, using local image: {e}")
+      except RuntimeError:
+        # Image doesn't exist locally either
+        error = ImagePullError(env.base_image, str(e))
+        print(error.format_error(), file=sys.stderr)
+        return error.exit_code
+
     # Create volumes if specified
     volumes = {}
     if env.volumes:
+      print("  [2/6] Creating volumes...")
       for vol in env.volumes:
         if vol.type == "named":
-          print(f"  Creating volume: {vol.name}")
+          print(f"    Creating volume: {vol.name}")
           docker.create_volume(vol.name, labels={"dev-env": env_name})
         volumes[vol.source] = {"bind": vol.target, "mode": vol.mode}
+    else:
+      print("  [2/6] No volumes to create")
+
+    # Create custom network if specified
+    network_name = None
+    if env.network and env.network.name:
+      print(f"  [2.5/6] Creating custom network: {env.network.name}")
+      try:
+        # Check if network already exists
+        docker.get_network(env.network.name)
+        print(f"    Network already exists: {env.network.name}")
+      except RuntimeError:
+        # Network doesn't exist, create it
+        print(f"    Creating network: {env.network.name}")
+        docker.create_network(
+          name=env.network.name, driver=env.network.driver, options=env.network.options, labels=env.network.labels
+        )
+      network_name = env.network.name
 
     # Prepare environment variables
     environment = env.environment or {}
     environment["DEV_ENV_NAME"] = env_name
 
     # Create container
-    print(f"  Creating container: {container_name}")
+    print(f"  [3/6] Creating container: {container_name}")
     container_id = docker.create_container(
       name=container_name,
       image=env.base_image,
@@ -66,48 +142,69 @@ def cmd_up(args: argparse.Namespace) -> int:
       environment=environment,
       volumes=volumes,
       ports=env.ports,
+      network=network_name,
     )
 
     # Start container
-    print("  Starting container...")
+    print("  [4/6] Starting container...")
     docker.start_container(container_id)
 
     # Setup SSH if port 22 is exposed
     ssh_enabled = env.ports and (22 in env.ports or "22" in env.ports)
     if ssh_enabled:
-      print("  Setting up SSH server...")
+      print("  [5/6] Setting up SSH server...")
       try:
         from .utils import setup_ssh_server, inject_ssh_key, get_host_ssh_key
 
-        # Setup SSH server
+        # Setup SSH server with progress
+        print("    Installing SSH server...")
         setup_ssh_server(docker, container_id)
 
         # Get and inject host SSH key
+        print("    Configuring SSH keys...")
         public_key = get_host_ssh_key()
         inject_ssh_key(docker, container_id, public_key)
 
         # Start SSH daemon in background
+        print("    Starting SSH daemon...")
         docker.exec_run(container_id, ["/usr/sbin/sshd"], user="root")
 
-        print("  SSH server configured and started")
+        print("    SSH server configured and started")
       except Exception as e:
-        print(f"  Warning: SSH setup failed: {e}")
+        print(f"    Warning: SSH setup failed: {e}")
+    else:
+      print("  [5/6] SSH not enabled")
 
     # Setup Git repository if configured
     if env.git:
-      print(f"  Cloning repository: {env.git.url}")
+      print("  [6/6] Setting up Git repository...")
       try:
         from .utils import setup_git_in_container, get_host_git_config
 
         # Get host git configuration
+        print("    Installing Git and configuring...")
         host_git_config = get_host_git_config()
 
         # Setup git and clone repository
+        print(f"    Cloning repository: {env.git.url}")
         setup_git_in_container(docker, container_id, env.git, host_git_config)
 
-        print(f"  Repository cloned to {env.git.path}")
+        print(f"    Repository cloned to {env.git.path}")
       except Exception as e:
-        print(f"  Warning: Git setup failed: {e}")
+        print(f"    Warning: Git setup failed: {e}")
+    else:
+      print("  [6/6] No Git repository configured")
+
+    # Wait for container to be ready
+    print("\n  Final checks: Waiting for container to be ready...")
+    import time
+
+    start_time = time.time()
+    if docker.wait_for_container_ready(container_id, timeout=30):
+      elapsed = time.time() - start_time
+      print(f"  ✅ Container is ready! (took {elapsed:.1f}s)")
+    else:
+      print("  ⚠️  Warning: Container readiness check timed out")
 
     # Save state
     state.save_environment(
@@ -117,6 +214,7 @@ def cmd_up(args: argparse.Namespace) -> int:
         "container_name": container_name,
         "config": env.to_dict(),
         "volumes": [v.name for v in env.volumes if v.type == "named"] if env.volumes else [],
+        "network": network_name if network_name else None,
       },
     )
 
@@ -129,8 +227,16 @@ def cmd_up(args: argparse.Namespace) -> int:
 
     return 0
 
+  except DevEnvError as e:
+    print(e.format_error(), file=sys.stderr)
+    # Cleanup on error
+    try:
+      state.remove_environment(env_name)
+    except Exception:
+      pass
+    return e.exit_code
   except Exception as e:
-    print(f"Error creating environment: {e}", file=sys.stderr)
+    print(f"Unexpected error creating environment: {e}", file=sys.stderr)
     # Cleanup on error
     try:
       state.remove_environment(env_name)
@@ -142,15 +248,17 @@ def cmd_up(args: argparse.Namespace) -> int:
 def cmd_down(args: argparse.Namespace) -> int:
   """Stop and remove a development environment"""
   if not check_docker_available():
-    print("Error: Docker daemon is not accessible", file=sys.stderr)
-    return 1
+    error = DockerNotAvailableError()
+    print(error.format_error(), file=sys.stderr)
+    return error.exit_code
 
   state = StateManager(args.state_dir)
   env_state = state.get_environment(args.name)
 
   if not env_state:
-    print(f"Environment '{args.name}' not found", file=sys.stderr)
-    return 1
+    error = EnvironmentNotFoundError(args.name)
+    print(error.format_error(), file=sys.stderr)
+    return error.exit_code
 
   docker = DockerClient()
 
@@ -172,6 +280,22 @@ def cmd_down(args: argparse.Namespace) -> int:
           docker.remove_volume(volume)
         except Exception:
           print(f"    Warning: Failed to remove volume {volume}")
+
+    # Remove custom network if it exists and no other containers are using it
+    if env_state.get("network"):
+      network_name = env_state["network"]
+      print(f"  Checking network: {network_name}")
+      try:
+        network = docker.get_network(network_name)
+        # Check if any other containers are connected
+        containers = network.get("Containers", {})
+        if not containers:
+          print(f"  Removing unused network: {network_name}")
+          docker.remove_network(network_name)
+        else:
+          print(f"  Network {network_name} has other containers, keeping it")
+      except Exception:
+        print(f"    Warning: Could not check/remove network {network_name}")
 
     # Remove state
     state.remove_environment(args.name)
@@ -195,8 +319,8 @@ def cmd_list(args: argparse.Namespace) -> int:
 
   docker = DockerClient() if check_docker_available() else None
 
-  print(f"{'NAME':<20} {'STATUS':<10} {'CONTAINER':<12} {'IMAGE':<30}")
-  print("-" * 72)
+  print(f"{'NAME':<20} {'STATUS':<10} {'CONTAINER':<12} {'IMAGE':<25} {'VOLUMES':<15}")
+  print("-" * 87)
 
   for name, env_state in environments.items():
     status = "unknown"
@@ -208,10 +332,31 @@ def cmd_list(args: argparse.Namespace) -> int:
         status = "not found"
 
     config = env_state.get("config", {})
-    image = config.get("base_image", "unknown")[:30]
+    image = config.get("base_image", "unknown")[:25]
     container_id = env_state["container_id"][:12]
 
-    print(f"{name:<20} {status:<10} {container_id:<12} {image:<30}")
+    # Get volume info
+    volumes_info = "none"
+    if env_state.get("volumes") and docker:
+      from .utils import format_size
+
+      total_size = 0
+      volume_count = len(env_state["volumes"])
+
+      for volume_name in env_state["volumes"]:
+        try:
+          usage = docker.get_volume_usage(volume_name)
+          if usage["size"] > 0:
+            total_size += usage["size"]
+        except Exception:
+          pass
+
+      if total_size > 0:
+        volumes_info = f"{volume_count} ({format_size(total_size)})"
+      else:
+        volumes_info = f"{volume_count} vols"
+
+    print(f"{name:<20} {status:<10} {container_id:<12} {image:<25} {volumes_info:<15}")
 
   return 0
 
@@ -219,15 +364,17 @@ def cmd_list(args: argparse.Namespace) -> int:
 def cmd_exec(args: argparse.Namespace) -> int:
   """Execute a command in an environment"""
   if not check_docker_available():
-    print("Error: Docker daemon is not accessible", file=sys.stderr)
-    return 1
+    error = DockerNotAvailableError()
+    print(error.format_error(), file=sys.stderr)
+    return error.exit_code
 
   state = StateManager(args.state_dir)
   env_state = state.get_environment(args.name)
 
   if not env_state:
-    print(f"Environment '{args.name}' not found", file=sys.stderr)
-    return 1
+    error = EnvironmentNotFoundError(args.name)
+    print(error.format_error(), file=sys.stderr)
+    return error.exit_code
 
   docker = DockerClient()
 
@@ -237,8 +384,9 @@ def cmd_exec(args: argparse.Namespace) -> int:
     # Check if container is running
     container = docker.get_container(container_id)
     if container["State"]["Status"] != "running":
-      print(f"Error: Environment '{args.name}' is not running", file=sys.stderr)
-      return 1
+      error = ContainerNotRunningError(args.name)
+      print(error.format_error(), file=sys.stderr)
+      return error.exit_code
 
     # Create exec instance
     exec_id = docker.create_exec(
@@ -271,15 +419,17 @@ def cmd_ssh(args: argparse.Namespace) -> int:
   env_state = state.get_environment(args.name)
 
   if not env_state:
-    print(f"Environment '{args.name}' not found", file=sys.stderr)
-    return 1
+    error = EnvironmentNotFoundError(args.name)
+    print(error.format_error(), file=sys.stderr)
+    return error.exit_code
 
   config = env_state.get("config", {})
   ports = config.get("ports", {})
 
   if "22" not in ports and 22 not in ports:
-    print(f"Environment '{args.name}' does not have SSH enabled", file=sys.stderr)
-    return 1
+    error = SSHNotEnabledError(args.name)
+    print(error.format_error(), file=sys.stderr)
+    return error.exit_code
 
   ssh_port = 22
   port_config = ports.get("22") or ports.get(22)
@@ -294,6 +444,86 @@ def cmd_ssh(args: argparse.Namespace) -> int:
   ssh_args.append("root@localhost")
 
   return subprocess.call(ssh_args)
+
+
+def cmd_logs(args: argparse.Namespace) -> int:
+  """Show container logs"""
+  if not check_docker_available():
+    error = DockerNotAvailableError()
+    print(error.format_error(), file=sys.stderr)
+    return error.exit_code
+
+  state = StateManager(args.state_dir)
+  env_state = state.get_environment(args.name)
+
+  if not env_state:
+    error = EnvironmentNotFoundError(args.name)
+    print(error.format_error(), file=sys.stderr)
+    return error.exit_code
+
+  docker = DockerClient()
+
+  try:
+    container_id = env_state["container_id"]
+
+    # Get logs
+    logs = docker.get_container_logs(container_id=container_id, follow=args.follow, tail=args.tail)
+
+    # Print logs, handling Docker's log format
+    if logs:
+      # Docker logs can contain header bytes, we need to handle this
+      output = logs.decode("utf-8", errors="replace")
+      print(output, end="")
+
+    return 0
+
+  except Exception as e:
+    print(f"Error getting logs: {e}", file=sys.stderr)
+    return 1
+
+
+def cmd_attach(args: argparse.Namespace) -> int:
+  """Attach to an environment's main process"""
+  if not check_docker_available():
+    error = DockerNotAvailableError()
+    print(error.format_error(), file=sys.stderr)
+    return error.exit_code
+
+  state = StateManager(args.state_dir)
+  env_state = state.get_environment(args.name)
+
+  if not env_state:
+    error = EnvironmentNotFoundError(args.name)
+    print(error.format_error(), file=sys.stderr)
+    return error.exit_code
+
+  docker = DockerClient()
+
+  try:
+    container_id = env_state["container_id"]
+
+    # Check if container is running
+    container = docker.get_container(container_id)
+    if container["State"]["Status"] != "running":
+      error = ContainerNotRunningError(args.name)
+      print(error.format_error(), file=sys.stderr)
+      return error.exit_code
+
+    print(f"Attaching to environment '{args.name}' (press Ctrl+C to detach)...")
+
+    # Simple attach - in a real implementation we'd handle TTY properly
+    try:
+      output = docker.attach_container(container_id, stream=False)
+      if output:
+        print(output.decode("utf-8", errors="replace"), end="")
+    except KeyboardInterrupt:
+      print("\nDetached from environment")
+
+    return 0
+
+  except Exception as e:
+    print(f"Error attaching to environment: {e}", file=sys.stderr)
+    return 1
 
 
 def main():
@@ -329,6 +559,21 @@ def main():
   ssh_parser.add_argument("name", help="Environment name")
   ssh_parser.add_argument("ssh_args", nargs="*", help="Additional SSH arguments")
 
+  # logs command
+  logs_parser = subparsers.add_parser("logs", help="Show container logs")
+  logs_parser.add_argument("name", help="Environment name")
+  logs_parser.add_argument("-f", "--follow", action="store_true", help="Follow log output")
+  logs_parser.add_argument("--tail", type=int, help="Number of lines to show from end of logs")
+
+  # attach command
+  attach_parser = subparsers.add_parser("attach", help="Attach to environment's main process")
+  attach_parser.add_argument("name", help="Environment name")
+
+  # completion command
+  from .completion import add_completion_parser
+
+  add_completion_parser(subparsers)
+
   args = parser.parse_args()
 
   if not args.command:
@@ -345,9 +590,19 @@ def main():
     "list": cmd_list,
     "exec": cmd_exec,
     "ssh": cmd_ssh,
+    "logs": cmd_logs,
+    "attach": cmd_attach,
   }
 
-  return commands[args.command](args)
+  try:
+    # Handle completion command specially since it uses a different pattern
+    if hasattr(args, "func"):
+      return args.func(args)
+
+    return commands[args.command](args)
+  except DevEnvError as e:
+    print(e.format_error(), file=sys.stderr)
+    return e.exit_code
 
 
 if __name__ == "__main__":

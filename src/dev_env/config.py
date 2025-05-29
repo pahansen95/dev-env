@@ -55,6 +55,20 @@ class SSHConfig:
 
 
 @dataclass
+class NetworkConfig:
+  """Network configuration"""
+
+  name: Optional[str] = None
+  driver: str = "bridge"
+  options: Optional[Dict[str, str]] = None
+  labels: Optional[Dict[str, str]] = None
+
+  def __post_init__(self):
+    if self.driver not in ("bridge", "host", "none", "overlay", "macvlan"):
+      raise ValueError(f"Invalid network driver: {self.driver}")
+
+
+@dataclass
 class Environment:
   """Development environment configuration"""
 
@@ -66,6 +80,7 @@ class Environment:
   ports: Optional[Dict[int, Any]] = None
   git: Optional[GitConfig] = None
   ssh: Optional[SSHConfig] = None
+  network: Optional[NetworkConfig] = None
   labels: Optional[Dict[str, str]] = None
 
   def __post_init__(self):
@@ -95,6 +110,8 @@ class Environment:
       data["git"] = GitConfig(**data["git"]) if isinstance(data["git"], dict) else data["git"]
     if "ssh" in data and data["ssh"]:
       data["ssh"] = SSHConfig(**data["ssh"]) if isinstance(data["ssh"], dict) else data["ssh"]
+    if "network" in data and data["network"]:
+      data["network"] = NetworkConfig(**data["network"]) if isinstance(data["network"], dict) else data["network"]
 
     return cls(**data)
 

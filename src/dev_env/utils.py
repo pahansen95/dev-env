@@ -4,8 +4,9 @@ import subprocess
 import shutil
 import tempfile
 import socket
+import os
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple, Dict, Any
 import hashlib
 import time
 
@@ -202,6 +203,91 @@ def wait_for_port(host: str, port: int, timeout: int = 30) -> bool:
   return False
 
 
+def validate_port_mappings(ports: Dict[int, Any]) -> List[str]:
+  """Validate port mappings and return list of warnings/errors"""
+  warnings = []
+
+  if not ports:
+    return warnings
+
+  # Check for port conflicts with running processes
+  for container_port, host_config in ports.items():
+    if isinstance(host_config, dict):
+      host_port = host_config.get("HostPort")
+      if host_port:
+        host_port = int(host_port)
+
+        # Check if port is already in use
+        if not _is_port_available("localhost", host_port):
+          warnings.append(f"Port {host_port} is already in use")
+
+        # Check for privileged ports (< 1024) on Unix systems
+        if host_port < 1024:
+          warnings.append(f"Port {host_port} is privileged (< 1024), may require root access")
+
+        # Check for common reserved ports
+        reserved_ports = {
+          20: "FTP Data",
+          21: "FTP Control",
+          22: "SSH",
+          23: "Telnet",
+          25: "SMTP",
+          53: "DNS",
+          80: "HTTP",
+          110: "POP3",
+          143: "IMAP",
+          443: "HTTPS",
+          993: "IMAPS",
+          995: "POP3S",
+        }
+
+        if host_port in reserved_ports and container_port != host_port:
+          service = reserved_ports[host_port]
+          warnings.append(f"Port {host_port} is typically reserved for {service}")
+
+  return warnings
+
+
+def _is_port_available(host: str, port: int) -> bool:
+  """Check if a port is available for binding"""
+  try:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(1)
+    result = sock.connect_ex((host, port))
+    sock.close()
+    return result != 0  # Port is available if connection fails
+  except Exception:
+    return False
+
+
+def validate_bind_mounts(volumes: List) -> List[str]:
+  """Validate bind mount paths and return warnings"""
+  warnings = []
+
+  for volume in volumes:
+    if hasattr(volume, "type") and volume.type == "bind":
+      source_path = Path(volume.source)
+
+      # Check if source path exists
+      if not source_path.exists():
+        warnings.append(f"Bind mount source does not exist: {source_path}")
+
+      # Check if source is readable
+      elif not source_path.is_dir() and not source_path.is_file():
+        warnings.append(f"Bind mount source is not a file or directory: {source_path}")
+
+      # Check permissions (basic check)
+      elif not os.access(source_path, os.R_OK):
+        warnings.append(f"Bind mount source is not readable: {source_path}")
+
+      # Warn about mounting system directories
+      system_dirs = {"/", "/bin", "/boot", "/dev", "/etc", "/lib", "/proc", "/sys", "/usr"}
+      if str(source_path) in system_dirs:
+        warnings.append(f"Mounting system directory {source_path} can be dangerous")
+
+  return warnings
+
+
 def setup_ssh_server(docker_client, container_id: str) -> None:
   """Setup SSH server in container"""
 
@@ -377,3 +463,85 @@ def get_host_git_config() -> Dict[str, str]:
     pass
 
   return config
+
+
+class DevEnvError(Exception):
+  """Base exception for dev-env with actionable remediation"""
+
+  def __init__(self, message: str, remediation: Optional[str] = None, exit_code: int = 1):
+    self.message = message
+    self.remediation = remediation
+    self.exit_code = exit_code
+    super().__init__(message)
+
+  def format_error(self) -> str:
+    """Format error with remediation"""
+    if self.remediation:
+      return f"Error: {self.message}\n\nRemediation: {self.remediation}"
+    return f"Error: {self.message}"
+
+
+class DockerNotAvailableError(DevEnvError):
+  """Docker is not available or accessible"""
+
+  def __init__(self):
+    super().__init__(
+      "Docker daemon is not accessible",
+      "Please ensure Docker is installed and running:\n"
+      "  • macOS: Start Docker Desktop\n"
+      "  • Linux: sudo systemctl start docker\n"
+      "  • Check permissions: sudo usermod -aG docker $USER (requires logout/login)",
+    )
+
+
+class EnvironmentExistsError(DevEnvError):
+  """Environment already exists"""
+
+  def __init__(self, env_name: str):
+    super().__init__(
+      f"Environment '{env_name}' already exists",
+      f"To recreate the environment:\n"
+      f"  • Remove existing: python -m dev_env down {env_name}\n"
+      f"  • Or use a different name: python -m dev_env up <config> --name {env_name}-new",
+    )
+
+
+class EnvironmentNotFoundError(DevEnvError):
+  """Environment not found"""
+
+  def __init__(self, env_name: str):
+    super().__init__(f"Environment '{env_name}' not found", "List available environments: python -m dev_env list")
+
+
+class ContainerNotRunningError(DevEnvError):
+  """Container is not running"""
+
+  def __init__(self, env_name: str):
+    super().__init__(
+      f"Environment '{env_name}' is not running",
+      f"Start the environment: python -m dev_env up <config> --name {env_name}",
+    )
+
+
+class ImagePullError(DevEnvError):
+  """Image pull failed"""
+
+  def __init__(self, image: str, original_error: str):
+    super().__init__(
+      f"Failed to pull image '{image}': {original_error}",
+      "Try these solutions:\n"
+      "  • Check image name spelling\n"
+      "  • Verify internet connection\n"
+      "  • For private registries: docker login <registry>\n"
+      "  • Use a different image tag or registry",
+    )
+
+
+class SSHNotEnabledError(DevEnvError):
+  """SSH is not enabled for environment"""
+
+  def __init__(self, env_name: str):
+    super().__init__(
+      f"Environment '{env_name}' does not have SSH enabled",
+      'To enable SSH, ensure port 22 is exposed in your configuration:\n  ports = {22: {"HostPort": 2222}}',
+    )
