@@ -59,9 +59,9 @@ class StateManager:
     with self._get_conn() as conn:
       conn.execute(
         """
-                INSERT OR REPLACE INTO environments 
+                INSERT OR REPLACE INTO environments
                 (name, container_id, container_name, config, volumes, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 
+                VALUES (?, ?, ?, ?, ?,
                     COALESCE((SELECT created_at FROM environments WHERE name = ?), ?),
                     ?)
             """,

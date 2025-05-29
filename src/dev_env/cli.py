@@ -97,7 +97,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     # Cleanup on error
     try:
       state.remove_environment(env_name)
-    except:
+    except Exception:
       pass
     return 1
 
@@ -133,7 +133,7 @@ def cmd_down(args: argparse.Namespace) -> int:
         print(f"  Removing volume: {volume}")
         try:
           docker.remove_volume(volume)
-        except:
+        except Exception:
           print(f"    Warning: Failed to remove volume {volume}")
 
     # Remove state
@@ -167,7 +167,7 @@ def cmd_list(args: argparse.Namespace) -> int:
       try:
         container = docker.get_container(env_state["container_id"])
         status = container["State"]["Status"]
-      except:
+      except Exception:
         status = "not found"
 
     config = env_state.get("config", {})
@@ -237,7 +237,7 @@ def main():
   down_parser.add_argument("--volumes", action="store_true", help="Also remove volumes")
 
   # list command
-  list_parser = subparsers.add_parser("list", help="List all environments")
+  subparsers.add_parser("list", help="List all environments")
 
   # exec command
   exec_parser = subparsers.add_parser("exec", help="Execute command in environment")
