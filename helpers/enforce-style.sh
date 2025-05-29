@@ -2,7 +2,7 @@
 # Apply ruff formatting and linting to Python files in the project
 # Matches the style guidelines from helpers/apply-style.py
 
-set -xeuo pipefail
+set -euo pipefail
 
 # Colors for output
 RED='\033[0;31m'
