@@ -11,6 +11,7 @@ The dev-env tool now has a complete container initialization pipeline with:
 - **Container Monitoring**: Health checks and logs command for debugging
 - **CLI Commands**: `up`, `down`, `list`, `exec`, `ssh`, `logs`, `attach` all functional
 - **Zero Dependencies**: Uses only Python 3.13+ standard library
+- **Shell Completion**: Bash, Zsh, and Fish completion scripts
 
 **Example Usage:**
 ```bash
@@ -33,62 +34,94 @@ python -m dev_env logs python-dev -f
 python -m dev_env attach python-dev
 ```
 
-## ✅ Critical Path - Container Initialization Pipeline (COMPLETED)
+## 🚨 Critical Next Steps - Testing Infrastructure
 
-### 1. Docker Exec API 
-- [x] Implement `create_exec` endpoint in `docker.py`
-- [x] Implement `start_exec` with output capture
-- [x] Add streaming response handler for real-time output
-- [x] Test exec functionality with basic commands
-- [x] Add convenience `exec_run` method
+### Integration Testing (HIGHEST PRIORITY)
+The project has reached ~3000 lines with zero test coverage. The container initialization pipeline is too complex for manual testing alone.
 
-### 2. SSH Server Setup
-- [x] Auto-install OpenSSH server in containers (apt/yum/apk detection)
-- [x] Generate ephemeral host keys on startup
-- [x] Inject host's public key as authorized_keys
-- [x] Configure and start SSH daemon
-- [x] Integrated into container initialization flow
+- [ ] Create test infrastructure using pytest
+- [ ] Test complete environment lifecycle (up → ssh → exec → down)
+- [ ] Verify SSH connectivity across different base images
+- [ ] Test Git repository cloning with various URLs
+- [ ] Validate error handling and recovery
+- [ ] Test Docker API edge cases (missing images, port conflicts)
+- [ ] Create fixtures for automatic cleanup
+- [ ] Add CI/CD pipeline with test execution
 
-### 3. Git Repository Integration  
-- [x] Clone repositories inside containers via exec
-- [x] Configure git identity from host settings
-- [x] Support shallow clones for performance
-- [x] Auto-install git if not present
-- [x] Integrated into container setup process
+### Why Testing First?
+- Container initialization involves complex package manager detection (apt/yum/apk)
+- SSH setup has multiple failure points
+- Cannot safely refactor without regression tests
+- Need confidence before implementing security features
 
-### 4. Image Pull Support
-- [x] Implement streaming pull with progress
-- [x] Parse image specifications (registry/name:tag)
-- [ ] Handle authentication for private registries
-- [x] Add progress callback mechanism
+## 🔒 Security Hardening (After Testing)
 
-### 5. Complete Initialization Flow
-- [x] Integrate all components in `cmd_up`
-- [x] Add proper error handling with warnings
-- [x] Show connection instructions on success
-- [x] Add health checks before declaring "ready"
+### Non-Root Container Execution
+- [ ] Implement user creation in containers
+- [ ] Configure containers to run as uid 1000:1000
+- [ ] Update SSH configuration for non-root user
+- [ ] Handle permission issues with volumes
 
-## 📋 Core Functionality
+### Capability Restrictions
+- [ ] Drop all capabilities by default
+- [ ] Add only required capabilities (CHOWN, SETUID, SETGID)
+- [ ] Implement no-new-privileges security option
+- [ ] Document security model
+
+### Implementation Notes
+```python
+# docker.py updates needed:
+config["User"] = "1000:1000"
+config["HostConfig"]["CapDrop"] = ["ALL"]
+config["HostConfig"]["CapAdd"] = ["CHOWN", "SETUID", "SETGID"]
+config["HostConfig"]["SecurityOpt"] = ["no-new-privileges"]
+```
+
+## 📊 Resource Management
+
+### Apply Configured Limits
+- [ ] Honor memory limits in container creation
+- [ ] Apply CPU quota based on cpus configuration
+- [ ] Add memory/CPU validation in config
+- [ ] Test resource constraints
+
+### Simple Implementation
+```python
+# Missing in docker.py create_container():
+if env.memory:
+    config["HostConfig"]["Memory"] = parse_memory_string(env.memory)
+if env.cpus:
+    config["HostConfig"]["CpuQuota"] = int(env.cpus * 100000)
+    config["HostConfig"]["CpuPeriod"] = 100000
+```
+
+## 📋 Core Functionality Improvements
 
 ### Container Management
-- [x] Implement `exec` command functionality
-- [x] Add container health monitoring
-- [x] Support attach/detach operations
-- [x] Add `logs` command for debugging
+- [ ] Support container restart policies
+- [ ] Add pause/unpause commands
+- [ ] Implement container rename
+- [ ] Add inspect command for debugging
 
 ### Developer Experience
-- [x] Progress indicators for long operations
-- [x] Actionable error messages with remediation
-- [x] Shell completion scripts  
 - [ ] Quick-start wizard for new users
+- [ ] Environment templates catalog
+- [ ] Better progress indicators for all operations
+- [ ] Interactive mode for complex operations
 
 ### Networking & Volumes
-- [x] Validate port mappings before creation
-- [x] Support custom networks
-- [x] Implement bind mount validation
-- [x] Add volume size tracking
+- [ ] Support for Docker Compose-style networking
+- [ ] Volume backup and restore commands
+- [ ] Network isolation options
+- [ ] Volume migration between environments
 
 ## 🧪 Testing & Validation
+
+### Unit Tests
+- [ ] Test configuration loading and validation
+- [ ] Test state management operations
+- [ ] Test Docker API request formatting
+- [ ] Test utility functions
 
 ### Integration Tests
 - [ ] Test complete environment lifecycle
@@ -105,14 +138,14 @@ python -m dev_env attach python-dev
 ## 📚 Documentation
 
 ### User Documentation
-- [ ] Quick start guide
-- [ ] Common workflows and examples
-- [ ] Troubleshooting guide
-- [ ] Migration from docker-compose
+- [ ] Quick start guide with real examples
+- [ ] Common development workflows
+- [ ] Troubleshooting guide with solutions
+- [ ] Migration guide from docker-compose
 
 ### Developer Documentation
 - [ ] Architecture deep dive
-- [ ] Extension points
+- [ ] Extension points for customization
 - [ ] Contributing guidelines
 - [ ] API reference
 
@@ -136,29 +169,13 @@ python -m dev_env attach python-dev
 - [ ] Homebrew formula
 - [ ] Container image with dev-env pre-installed
 
-## Implementation Notes
+## Implementation Priority Order
 
-### Docker Exec Implementation
-```python
-# Required endpoints:
-# POST /containers/{id}/exec - Create exec instance
-# POST /exec/{id}/start - Start exec and stream output
-# GET /exec/{id}/json - Get exit code
-```
-
-### SSH Setup Sequence
-1. Check if SSH server installed
-2. Install if missing (apt/yum based on image)
-3. Generate host keys
-4. Create .ssh directory
-5. Copy authorized_keys
-6. Start sshd daemon
-
-### Git Clone Strategy
-- Use exec to run git inside container
-- Mount SSH socket for authentication
-- Configure user.name/user.email from host
-- Support both HTTPS and SSH URLs
+1. **Testing Infrastructure** - Cannot proceed safely without tests
+2. **Security Hardening** - Critical for production use
+3. **Resource Management** - Quick win, low complexity
+4. **User Documentation** - Needed for adoption
+5. **Distribution** - Once stable and tested
 
 ---
 
@@ -188,6 +205,9 @@ python -m dev_env attach python-dev
 - [x] Basic commands: up, down, list
 - [x] SSH command with port detection
 - [x] State directory management
+- [x] Exec command functionality
+- [x] Logs command with follow mode
+- [x] Attach command for debugging
 
 ### Phase 5: Utilities
 - [x] Docker availability checking
@@ -195,6 +215,9 @@ python -m dev_env attach python-dev
 - [x] Git/SSH operation utilities
 - [x] Port mapping parser
 - [x] Configuration hashing
+- [x] Port validation and conflict detection
+- [x] Bind mount validation
+- [x] Actionable error messages with remediation
 
 ### Phase 6: Project Setup
 - [x] Project structure created
@@ -212,3 +235,12 @@ python -m dev_env attach python-dev
 - [x] Complete `cmd_up` integration with error handling
 - [x] Example configuration with SSH + Git (`examples/python-with-git.py`)
 - [x] All linting and style checks passing
+
+### Phase 8: Developer Experience ✅
+- [x] Shell completion for Bash, Zsh, Fish (`completion.py`)
+- [x] Progress indicators for image pulls
+- [x] Actionable error messages with remediation
+- [x] Container health checks before declaring ready
+- [x] Custom network support
+- [x] Network creation and management
+- [x] Volume size tracking in list command
