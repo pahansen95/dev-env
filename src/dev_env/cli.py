@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+import subprocess
 from pathlib import Path
 
 from . import __version__
@@ -206,7 +207,6 @@ def cmd_ssh(args: argparse.Namespace) -> int:
     ssh_port = port_config.get("HostPort", 22)
 
   # Use subprocess to exec ssh
-  import subprocess
 
   ssh_args = ["ssh", "-p", str(ssh_port)]
   if args.ssh_args:
