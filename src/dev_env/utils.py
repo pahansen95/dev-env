@@ -5,7 +5,7 @@ import shutil
 import tempfile
 import socket
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 import hashlib
 import time
 
@@ -200,3 +200,180 @@ def wait_for_port(host: str, port: int, timeout: int = 30) -> bool:
     time.sleep(0.5)
 
   return False
+
+
+def setup_ssh_server(docker_client, container_id: str) -> None:
+  """Setup SSH server in container"""
+
+  # Detect package manager and install OpenSSH server
+  output, exit_code = docker_client.exec_run(container_id, ["which", "apt-get"])
+  if exit_code == 0:
+    # Debian/Ubuntu
+    docker_client.exec_run(container_id, ["apt-get", "update"])
+    docker_client.exec_run(container_id, ["apt-get", "install", "-y", "openssh-server"])
+  else:
+    output, exit_code = docker_client.exec_run(container_id, ["which", "yum"])
+    if exit_code == 0:
+      # RHEL/CentOS
+      docker_client.exec_run(container_id, ["yum", "install", "-y", "openssh-server"])
+    else:
+      output, exit_code = docker_client.exec_run(container_id, ["which", "apk"])
+      if exit_code == 0:
+        # Alpine
+        docker_client.exec_run(container_id, ["apk", "add", "openssh"])
+      else:
+        raise RuntimeError("Could not detect package manager for SSH installation")
+
+  # Create SSH directories
+  docker_client.exec_run(container_id, ["mkdir", "-p", "/var/run/sshd", "/root/.ssh"])
+  docker_client.exec_run(container_id, ["chmod", "700", "/root/.ssh"])
+
+  # Generate host keys
+  docker_client.exec_run(container_id, ["ssh-keygen", "-A"])
+
+  # Configure SSH daemon
+  sshd_config = """
+Port 22
+Protocol 2
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_dsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+UsePrivilegeSeparation yes
+KeyRegenerationInterval 3600
+ServerKeyBits 1024
+SyslogFacility AUTH
+LogLevel INFO
+LoginGraceTime 120
+PermitRootLogin yes
+StrictModes yes
+RSAAuthentication yes
+PubkeyAuthentication yes
+IgnoreRhosts yes
+RhostsRSAAuthentication no
+HostbasedAuthentication no
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+PasswordAuthentication no
+X11Forwarding yes
+X11DisplayOffset 10
+PrintMotd no
+PrintLastLog yes
+TCPKeepAlive yes
+AcceptEnv LANG LC_*
+Subsystem sftp /usr/lib/openssh/sftp-server
+UsePAM yes
+""".strip()
+
+  # Write SSH config
+  docker_client.exec_run(container_id, ["sh", "-c", f"echo '{sshd_config}' > /etc/ssh/sshd_config"])
+
+
+def inject_ssh_key(docker_client, container_id: str, public_key: str) -> None:
+  """Inject SSH public key into container"""
+  # Write authorized_keys
+  docker_client.exec_run(container_id, ["sh", "-c", f"echo '{public_key.strip()}' > /root/.ssh/authorized_keys"])
+  docker_client.exec_run(container_id, ["chmod", "600", "/root/.ssh/authorized_keys"])
+
+
+def start_ssh_daemon(docker_client, container_id: str) -> None:
+  """Start SSH daemon in container"""
+  # Start SSH daemon
+  output, exit_code = docker_client.exec_run(container_id, ["/usr/sbin/sshd", "-D"], user="root")
+  if exit_code != 0:
+    # Try alternative path
+    docker_client.exec_run(container_id, ["/usr/sbin/sshd"])
+
+
+def get_host_ssh_key() -> str:
+  """Get host's SSH public key"""
+  ssh_dir = Path.home() / ".ssh"
+
+  # Try common key files
+  for key_file in ["id_rsa.pub", "id_ed25519.pub", "id_ecdsa.pub"]:
+    key_path = ssh_dir / key_file
+    if key_path.exists():
+      return key_path.read_text().strip()
+
+  # Generate new key if none found
+  print("No SSH key found, generating new key pair...")
+  private_key, public_key = generate_ssh_key_pair()
+
+  # Save to default location
+  ssh_dir.mkdir(mode=0o700, exist_ok=True)
+  (ssh_dir / "id_rsa").write_text(private_key)
+  (ssh_dir / "id_rsa").chmod(0o600)
+  (ssh_dir / "id_rsa.pub").write_text(public_key)
+  (ssh_dir / "id_rsa.pub").chmod(0o644)
+
+  return public_key.strip()
+
+
+def setup_git_in_container(
+  docker_client, container_id: str, git_config, host_git_config: Optional[Dict[str, str]] = None
+) -> None:
+  """Setup Git and clone repository in container"""
+  # Install git if not present
+  output, exit_code = docker_client.exec_run(container_id, ["which", "git"])
+  if exit_code != 0:
+    # Detect package manager and install git
+    output, exit_code = docker_client.exec_run(container_id, ["which", "apt-get"])
+    if exit_code == 0:
+      # Debian/Ubuntu
+      docker_client.exec_run(container_id, ["apt-get", "update"])
+      docker_client.exec_run(container_id, ["apt-get", "install", "-y", "git"])
+    else:
+      output, exit_code = docker_client.exec_run(container_id, ["which", "yum"])
+      if exit_code == 0:
+        # RHEL/CentOS
+        docker_client.exec_run(container_id, ["yum", "install", "-y", "git"])
+      else:
+        output, exit_code = docker_client.exec_run(container_id, ["which", "apk"])
+        if exit_code == 0:
+          # Alpine
+          docker_client.exec_run(container_id, ["apk", "add", "git"])
+
+  # Configure git identity from host if available
+  if host_git_config:
+    if "user.name" in host_git_config:
+      docker_client.exec_run(container_id, ["git", "config", "--global", "user.name", host_git_config["user.name"]])
+    if "user.email" in host_git_config:
+      docker_client.exec_run(container_id, ["git", "config", "--global", "user.email", host_git_config["user.email"]])
+
+  # Create workspace directory
+  docker_client.exec_run(container_id, ["mkdir", "-p", git_config.path])
+
+  # Clone repository
+  clone_cmd = ["git", "clone"]
+  if git_config.shallow:
+    clone_cmd.extend(["--depth", "1"])
+  if git_config.branch and git_config.branch != "main":
+    clone_cmd.extend(["--branch", git_config.branch])
+  clone_cmd.extend([git_config.url, git_config.path])
+
+  output, exit_code = docker_client.exec_run(container_id, clone_cmd)
+  if exit_code != 0:
+    raise RuntimeError(f"Failed to clone repository: {output.decode('utf-8', errors='replace')}")
+
+
+def get_host_git_config() -> Dict[str, str]:
+  """Get host Git configuration"""
+  config = {}
+
+  try:
+    # Get user.name
+    result = subprocess.run(["git", "config", "--global", "user.name"], capture_output=True, text=True)
+    if result.returncode == 0:
+      config["user.name"] = result.stdout.strip()
+  except Exception:
+    pass
+
+  try:
+    # Get user.email
+    result = subprocess.run(["git", "config", "--global", "user.email"], capture_output=True, text=True)
+    if result.returncode == 0:
+      config["user.email"] = result.stdout.strip()
+  except Exception:
+    pass
+
+  return config

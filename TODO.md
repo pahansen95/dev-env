@@ -1,97 +1,171 @@
-# dev-env: Zero-Dependency Implementation Plan
+# dev-env: Implementation Roadmap
 
-## Overview
+## 🚧 Critical Path - Container Initialization Pipeline
 
-Implementation roadmap for a stdlib-only development environment management tool using Python 3.13+.
+### 1. Docker Exec API (Blocks Everything)
+- [ ] Implement `create_exec` endpoint in `docker.py`
+- [ ] Implement `start_exec` with output capture
+- [ ] Add streaming response handler for real-time output
+- [ ] Test exec functionality with basic commands
 
-## ✅ Completed
+### 2. SSH Server Setup
+- [ ] Auto-install OpenSSH server in containers
+- [ ] Generate ephemeral host keys on startup
+- [ ] Inject host's public key as authorized_keys
+- [ ] Configure and start SSH daemon
+- [ ] Validate SSH connectivity
 
-### Core Implementation
-- [x] Docker client using `http.client` and Unix sockets
-- [x] CLI using `argparse` instead of Click  
-- [x] Configuration system using `dataclasses` instead of Pydantic
-- [x] State management using `sqlite3` 
-- [x] Utilities for Git/SSH operations
-- [x] Python-based configuration files
-- [x] Example configurations
+### 3. Git Repository Integration  
+- [ ] Clone repositories inside containers via exec
+- [ ] Configure git identity from host settings
+- [ ] Handle authentication (SSH agent forwarding)
+- [ ] Support shallow clones for performance
 
-### Project Setup
-- [x] Project structure created
-- [x] `pyproject.toml` configured with zero dependencies
-- [x] Entry point defined
+### 4. Image Pull Support
+- [ ] Implement streaming pull with progress
+- [ ] Parse image specifications (registry/name:tag)
+- [ ] Handle authentication for private registries
+- [ ] Add progress callback mechanism
 
-## 🚧 In Progress
+### 5. Complete Initialization Flow
+- [ ] Integrate all components in `cmd_up`
+- [ ] Add health checks before declaring "ready"
+- [ ] Implement proper error handling with rollback
+- [ ] Show connection instructions on success
 
-### Testing & Validation
-- [ ] Test basic `up`/`down` commands
-- [ ] Validate Docker API communication
-- [ ] Test state persistence
-- [ ] Verify configuration loading
+## 📋 Core Functionality
 
-## 📋 TODO
-
-### Core Functionality
+### Container Management
 - [ ] Implement `exec` command functionality
-- [ ] Add proper image pulling support
-- [ ] Implement Git repository cloning in containers
-- [ ] Add SSH key injection for container access
+- [ ] Add container health monitoring
+- [ ] Support attach/detach operations
+- [ ] Add `logs` command for debugging
 
-### Error Handling & UX
-- [ ] Improve error messages with actionable feedback
-- [ ] Add progress indicators for long operations
-- [ ] Handle missing Docker images gracefully
-- [ ] Add `--force` flag for cleanup operations
+### Developer Experience
+- [ ] Progress indicators for long operations
+- [ ] Actionable error messages with remediation
+- [ ] Shell completion scripts
+- [ ] Quick-start wizard for new users
+
+### Networking & Volumes
+- [ ] Validate port mappings before creation
+- [ ] Support custom networks
+- [ ] Implement bind mount validation
+- [ ] Add volume size tracking
+
+## 🧪 Testing & Validation
+
+### Integration Tests
+- [ ] Test complete environment lifecycle
+- [ ] Verify SSH access works
+- [ ] Validate Git cloning
+- [ ] Test state persistence across restarts
+
+### Error Scenarios
+- [ ] Handle missing Docker daemon gracefully
+- [ ] Test cleanup on initialization failure
+- [ ] Verify port conflict detection
+- [ ] Test image pull failures
+
+## 📚 Documentation
+
+### User Documentation
+- [ ] Quick start guide
+- [ ] Common workflows and examples
+- [ ] Troubleshooting guide
+- [ ] Migration from docker-compose
+
+### Developer Documentation
+- [ ] Architecture deep dive
+- [ ] Extension points
+- [ ] Contributing guidelines
+- [ ] API reference
+
+## 🚀 Future Enhancements
+
+### Multi-Container Support
+- [ ] Environment dependency management
+- [ ] Shared networks between environments
+- [ ] Service discovery mechanism
+- [ ] Environment composition
 
 ### Advanced Features
-- [ ] Container health checks
-- [ ] Environment update/restart commands
-- [ ] Resource limits configuration
-- [ ] Network isolation options
-- [ ] Multi-container environments
-
-### Documentation
-- [ ] Usage guide with examples
-- [ ] Architecture documentation
-- [ ] API reference for configuration
-- [ ] Troubleshooting guide
+- [ ] Environment templates marketplace
+- [ ] Cloud backend support
+- [ ] Team collaboration features
+- [ ] Resource usage monitoring
 
 ### Distribution
 - [ ] Package for PyPI
 - [ ] Single-file distribution option
-- [ ] Installation instructions
-- [ ] Quick start guide
+- [ ] Homebrew formula
+- [ ] Container image with dev-env pre-installed
 
-## Design Principles
+## Implementation Notes
 
-1. **Zero Dependencies**: Only Python standard library
-2. **Python 3.13+**: Modern Python features
-3. **Simple > Complex**: Minimal viable features first
-4. **Direct Docker API**: No SDK abstractions
-5. **Configuration as Code**: Python files for configs
-
-## Architecture Notes
-
-```
-src/dev_env/
-├── __init__.py     # Package metadata
-├── cli.py          # argparse-based CLI
-├── docker.py       # Minimal Docker client
-├── config.py       # dataclass configurations  
-├── state.py        # SQLite persistence
-└── utils.py        # Helper functions
+### Docker Exec Implementation
+```python
+# Required endpoints:
+# POST /containers/{id}/exec - Create exec instance
+# POST /exec/{id}/start - Start exec and stream output
+# GET /exec/{id}/json - Get exit code
 ```
 
-## Key Decisions
+### SSH Setup Sequence
+1. Check if SSH server installed
+2. Install if missing (apt/yum based on image)
+3. Generate host keys
+4. Create .ssh directory
+5. Copy authorized_keys
+6. Start sshd daemon
 
-- **No external dependencies**: Portability and simplicity
-- **Direct Unix socket communication**: Lightweight Docker integration
-- **SQLite for state**: Built-in, reliable persistence
-- **Python configs**: Type safety without parsing overhead
+### Git Clone Strategy
+- Use exec to run git inside container
+- Mount SSH socket for authentication
+- Configure user.name/user.email from host
+- Support both HTTPS and SSH URLs
 
-## Next Immediate Steps
+---
 
-1. Create `__main__.py` for direct module execution
-2. Test basic environment creation
-3. Add missing subprocess import in cli.py
-4. Document usage patterns
-5. Create integration tests
+## ✅ Completed Work
+
+### Phase 1: Core Infrastructure
+- [x] Docker client using `http.client` and Unix sockets
+- [x] Minimal Docker API wrapper for container operations
+- [x] Container creation and lifecycle management
+- [x] Volume creation support
+
+### Phase 2: Configuration System
+- [x] Configuration system using `dataclasses` instead of Pydantic
+- [x] Python-based configuration files
+- [x] JSON configuration support
+- [x] Environment templates (Python, Node, Ubuntu)
+- [x] Configuration validation with post_init
+
+### Phase 3: State Management
+- [x] State management using `sqlite3`
+- [x] Atomic operations with transactions
+- [x] Environment tracking and persistence
+- [x] Metadata storage capability
+
+### Phase 4: CLI Implementation
+- [x] CLI using `argparse` instead of Click
+- [x] Basic commands: up, down, list
+- [x] SSH command with port detection
+- [x] State directory management
+
+### Phase 5: Utilities
+- [x] Docker availability checking
+- [x] Container name generation
+- [x] Git/SSH operation utilities
+- [x] Port mapping parser
+- [x] Configuration hashing
+
+### Phase 6: Project Setup
+- [x] Project structure created
+- [x] `pyproject.toml` configured with zero dependencies
+- [x] Entry point defined
+- [x] `__main__.py` for direct module execution
+- [x] Example configurations (Python, Node, Ubuntu)
+- [x] Architecture documentation in README
+- [x] Implementation strategy documented

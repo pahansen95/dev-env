@@ -72,6 +72,43 @@ def cmd_up(args: argparse.Namespace) -> int:
     print("  Starting container...")
     docker.start_container(container_id)
 
+    # Setup SSH if port 22 is exposed
+    ssh_enabled = env.ports and (22 in env.ports or "22" in env.ports)
+    if ssh_enabled:
+      print("  Setting up SSH server...")
+      try:
+        from .utils import setup_ssh_server, inject_ssh_key, get_host_ssh_key
+
+        # Setup SSH server
+        setup_ssh_server(docker, container_id)
+
+        # Get and inject host SSH key
+        public_key = get_host_ssh_key()
+        inject_ssh_key(docker, container_id, public_key)
+
+        # Start SSH daemon in background
+        docker.exec_run(container_id, ["/usr/sbin/sshd"], user="root")
+
+        print("  SSH server configured and started")
+      except Exception as e:
+        print(f"  Warning: SSH setup failed: {e}")
+
+    # Setup Git repository if configured
+    if env.git:
+      print(f"  Cloning repository: {env.git.url}")
+      try:
+        from .utils import setup_git_in_container, get_host_git_config
+
+        # Get host git configuration
+        host_git_config = get_host_git_config()
+
+        # Setup git and clone repository
+        setup_git_in_container(docker, container_id, env.git, host_git_config)
+
+        print(f"  Repository cloned to {env.git.path}")
+      except Exception as e:
+        print(f"  Warning: Git setup failed: {e}")
+
     # Save state
     state.save_environment(
       env_name,
@@ -86,7 +123,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     print(f"Environment '{env_name}' is up and running!")
 
     # Show connection info
-    if env.ports and 22 in env.ports:
+    if ssh_enabled:
       ssh_port = env.ports[22].get("HostPort", 22) if isinstance(env.ports[22], dict) else 22
       print(f"SSH access: ssh -p {ssh_port} root@localhost")
 
@@ -181,8 +218,51 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 def cmd_exec(args: argparse.Namespace) -> int:
   """Execute a command in an environment"""
-  print("Error: 'exec' command not yet implemented", file=sys.stderr)
-  return 1
+  if not check_docker_available():
+    print("Error: Docker daemon is not accessible", file=sys.stderr)
+    return 1
+
+  state = StateManager(args.state_dir)
+  env_state = state.get_environment(args.name)
+
+  if not env_state:
+    print(f"Environment '{args.name}' not found", file=sys.stderr)
+    return 1
+
+  docker = DockerClient()
+
+  try:
+    container_id = env_state["container_id"]
+
+    # Check if container is running
+    container = docker.get_container(container_id)
+    if container["State"]["Status"] != "running":
+      print(f"Error: Environment '{args.name}' is not running", file=sys.stderr)
+      return 1
+
+    # Create exec instance
+    exec_id = docker.create_exec(
+      container_id=container_id,
+      cmd=args.command,
+      tty=True,
+      attach_stdout=True,
+      attach_stderr=True,
+    )
+
+    # Start exec and capture output
+    output = docker.start_exec(exec_id)
+
+    # Print output
+    if output:
+      print(output.decode("utf-8", errors="replace"), end="")
+
+    # Get exit code
+    exec_info = docker.get_exec_info(exec_id)
+    return exec_info.get("ExitCode", 0)
+
+  except Exception as e:
+    print(f"Error executing command: {e}", file=sys.stderr)
+    return 1
 
 
 def cmd_ssh(args: argparse.Namespace) -> int:

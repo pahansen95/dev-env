@@ -147,3 +147,88 @@ class DockerClient:
     """List all volumes"""
     result = self._request("GET", "/volumes")
     return result.get("Volumes", [])
+
+  def create_exec(
+    self,
+    container_id: str,
+    cmd: List[str],
+    working_dir: Optional[str] = None,
+    environment: Optional[Dict[str, str]] = None,
+    user: str = "root",
+    attach_stdout: bool = True,
+    attach_stderr: bool = True,
+    tty: bool = False,
+  ) -> str:
+    """Create an exec instance"""
+    config = {
+      "AttachStdin": False,
+      "AttachStdout": attach_stdout,
+      "AttachStderr": attach_stderr,
+      "Tty": tty,
+      "Cmd": cmd,
+      "User": user,
+    }
+
+    if working_dir:
+      config["WorkingDir"] = working_dir
+
+    if environment:
+      config["Env"] = [f"{k}={v}" for k, v in environment.items()]
+
+    result = self._request("POST", f"/containers/{container_id}/exec", data=config)
+    return result["Id"]
+
+  def start_exec(self, exec_id: str, detach: bool = False) -> bytes:
+    """Start an exec instance and return output"""
+    config = {"Detach": detach, "Tty": False}
+
+    conn = UnixHTTPConnection(self.socket_path)
+    headers = {"Content-Type": "application/json"}
+    body = json.dumps(config).encode()
+
+    try:
+      conn.request("POST", f"/exec/{exec_id}/start", body, headers)
+      response = conn.getresponse()
+
+      if response.status >= 400:
+        error_data = response.read().decode()
+        error_msg = json.loads(error_data).get("message", "Unknown error") if error_data else f"HTTP {response.status}"
+        raise RuntimeError(f"Docker API error: {error_msg}")
+
+      # For detached mode, return empty bytes
+      if detach:
+        return b""
+
+      # Read all output
+      output = response.read()
+      return output
+    finally:
+      conn.close()
+
+  def get_exec_info(self, exec_id: str) -> Dict[str, Any]:
+    """Get exec instance information including exit code"""
+    return self._request("GET", f"/exec/{exec_id}/json")
+
+  def exec_run(
+    self,
+    container_id: str,
+    cmd: List[str],
+    working_dir: Optional[str] = None,
+    environment: Optional[Dict[str, str]] = None,
+    user: str = "root",
+  ) -> tuple[bytes, int]:
+    """Execute a command and return (output, exit_code)"""
+    exec_id = self.create_exec(
+      container_id=container_id,
+      cmd=cmd,
+      working_dir=working_dir,
+      environment=environment,
+      user=user,
+      tty=False,
+    )
+
+    output = self.start_exec(exec_id)
+    exec_info = self.get_exec_info(exec_id)
+    exit_code = exec_info.get("ExitCode", 0)
+
+    return output, exit_code
