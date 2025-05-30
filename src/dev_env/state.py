@@ -4,7 +4,7 @@ import sqlite3
 import json
 import contextlib
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any
 from datetime import datetime
 
 
@@ -52,7 +52,7 @@ class StateManager:
     finally:
       conn.close()
 
-  def save_environment(self, name: str, state: Dict[str, Any]) -> None:
+  def save_environment(self, name: str, state: dict[str, Any]) -> None:
     """Save environment state"""
     now = datetime.utcnow().isoformat()
 
@@ -77,7 +77,7 @@ class StateManager:
         ),
       )
 
-  def get_environment(self, name: str) -> Optional[Dict[str, Any]]:
+  def get_environment(self, name: str) -> dict[str, Any] | None:
     """Get environment state by name"""
     with self._get_conn() as conn:
       row = conn.execute("SELECT * FROM environments WHERE name = ?", (name,)).fetchone()
@@ -95,7 +95,7 @@ class StateManager:
         "updated_at": row["updated_at"],
       }
 
-  def list_environments(self) -> Dict[str, Dict[str, Any]]:
+  def list_environments(self) -> dict[str, dict[str, Any]]:
     """List all environments"""
     with self._get_conn() as conn:
       rows = conn.execute("SELECT * FROM environments ORDER BY name").fetchall()
@@ -122,14 +122,14 @@ class StateManager:
     with self._get_conn() as conn:
       conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", (key, value))
 
-  def get_metadata(self, key: str) -> Optional[str]:
+  def get_metadata(self, key: str) -> str | None:
     """Get metadata value"""
     with self._get_conn() as conn:
       row = conn.execute("SELECT value FROM metadata WHERE key = ?", (key,)).fetchone()
 
       return row["value"] if row else None
 
-  def cleanup_orphaned(self, existing_containers: List[str]) -> int:
+  def cleanup_orphaned(self, existing_containers: list[str]) -> int:
     """Remove state for containers that no longer exist"""
     with self._get_conn() as conn:
       # Get all tracked containers

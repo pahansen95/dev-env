@@ -3,7 +3,7 @@
 import json
 import socket
 import http.client
-from typing import Dict, Any, Optional, List, Callable
+from typing import Any, Callable
 from urllib.parse import urlencode
 
 
@@ -25,7 +25,7 @@ class DockerClient:
   def __init__(self, socket_path: str = "/var/run/docker.sock"):
     self.socket_path = socket_path
 
-  def _request(self, method: str, path: str, data: Optional[Dict] = None, params: Optional[Dict] = None) -> Any:
+  def _request(self, method: str, path: str, data: dict | None = None, params: dict | None = None) -> Any:
     """Make HTTP request to Docker daemon"""
     conn = UnixHTTPConnection(self.socket_path)
     headers = {"Content-Type": "application/json"}
@@ -60,13 +60,12 @@ class DockerClient:
     self,
     name: str,
     image: str,
-    command: Optional[List[str]] = None,
-    environment: Optional[Dict[str, str]] = None,
-    volumes: Optional[Dict[str, Dict]] = None,
-    ports: Optional[Dict[str, Any]] = None,
-    network: Optional[str] = None,
-    security: Optional[Any] = None,
-    resources: Optional[Any] = None,
+    command: list[str] | None = None,
+    environment: dict[str, str] | None = None,
+    volumes: dict[str, dict] | None = None,
+    ports: dict[str, Any] | None = None,
+    network: str | None = None,
+    env_config: Any | None = None,
   ) -> str:
     """Create a new container"""
     config = {
@@ -79,19 +78,19 @@ class DockerClient:
       "OpenStdin": True,
     }
 
-    # Apply security configuration
-    if security:
-      config["User"] = security.user
+    # Apply security configuration from environment
+    if env_config:
+      config["User"] = env_config.user
 
       # Security options
       security_opts = []
-      if security.no_new_privileges:
+      if env_config.no_new_privileges:
         security_opts.append("no-new-privileges:true")
       if security_opts:
         config["SecurityOpt"] = security_opts
 
       # Read-only root filesystem
-      if security.read_only_root_fs:
+      if env_config.read_only_root_fs:
         config["ReadonlyRootfs"] = True
 
     if command:
@@ -103,17 +102,17 @@ class DockerClient:
     # Initialize HostConfig for resource and security constraints
     host_config = {}
 
-    # Apply resource configuration
-    if resources:
-      resource_config = resources.to_docker_config()
+    # Apply resource and security configuration from environment
+    if env_config:
+      # Resource constraints
+      resource_config = env_config.to_docker_host_config()
       host_config.update(resource_config)
 
-    # Apply security capabilities
-    if security:
-      if security.drop_capabilities:
-        host_config["CapDrop"] = security.drop_capabilities
-      if security.add_capabilities:
-        host_config["CapAdd"] = security.add_capabilities
+      # Security capabilities
+      if env_config.drop_capabilities:
+        host_config["CapDrop"] = env_config.drop_capabilities
+      if env_config.add_capabilities:
+        host_config["CapAdd"] = env_config.add_capabilities
 
     if volumes:
       config["Volumes"] = {v: {} for v in volumes.keys()}
@@ -162,15 +161,15 @@ class DockerClient:
     """Remove a container"""
     self._request("DELETE", f"/containers/{container_id}", params={"force": force})
 
-  def get_container(self, container_id: str) -> Dict[str, Any]:
+  def get_container(self, container_id: str) -> dict[str, Any]:
     """Get container details"""
     return self._request("GET", f"/containers/{container_id}/json")
 
-  def list_containers(self, all: bool = False) -> List[Dict[str, Any]]:
+  def list_containers(self, all: bool = False) -> list[dict[str, Any]]:
     """List containers"""
     return self._request("GET", "/containers/json", params={"all": all})
 
-  def pull_image(self, image: str, progress_callback: Optional[Callable[[str, float], None]] = None) -> None:
+  def pull_image(self, image: str, progress_callback: Callable[[str, float], None] | None = None) -> None:
     """Pull an image from registry with streaming progress"""
     # First check if image already exists
     try:
@@ -235,7 +234,7 @@ class DockerClient:
 
     return registry, name, tag
 
-  def _process_pull_stream(self, response, progress_callback: Optional[Callable[[str, float], None]]) -> None:
+  def _process_pull_stream(self, response, progress_callback: Callable[[str, float], None] | None) -> None:
     """Process streaming pull response"""
     layers = {}
     total_size = 0
@@ -278,7 +277,7 @@ class DockerClient:
         if progress_callback:
           progress_callback(status, 100.0)
 
-  def create_volume(self, name: str, labels: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+  def create_volume(self, name: str, labels: dict[str, str] | None = None) -> dict[str, Any]:
     """Create a named volume"""
     data = {"Name": name}
     if labels:
@@ -289,52 +288,30 @@ class DockerClient:
     """Remove a volume"""
     self._request("DELETE", f"/volumes/{name}")
 
-  def list_volumes(self) -> List[Dict[str, Any]]:
+  def list_volumes(self) -> list[dict[str, Any]]:
     """List all volumes"""
     result = self._request("GET", "/volumes")
     return result.get("Volumes", [])
 
-  def get_volume(self, name: str) -> Dict[str, Any]:
+  def get_volume(self, name: str) -> dict[str, Any]:
     """Get volume details"""
     return self._request("GET", f"/volumes/{name}")
 
-  def get_volume_usage(self, name: str) -> Dict[str, Any]:
-    """Get volume usage information via system df"""
-    try:
-      # Use system df to get volume usage
-      result = self._request("GET", "/system/df")
-      volumes = result.get("Volumes", [])
-
-      for volume in volumes:
-        if volume.get("Name") == name:
-          return {
-            "size": volume.get("Size", 0),
-            "usage_data": volume.get("UsageData", {}),
-            "ref_count": volume.get("RefCount", 0),
-          }
-
-      return {"size": 0, "usage_data": {}, "ref_count": 0}
-    except Exception:
-      # Fallback - volume exists but no size info available
-      return {"size": -1, "usage_data": {}, "ref_count": 0}
-
-  def create_exec(
+  def exec_run(
     self,
     container_id: str,
-    cmd: List[str],
-    working_dir: Optional[str] = None,
-    environment: Optional[Dict[str, str]] = None,
+    cmd: list[str],
+    working_dir: str | None = None,
+    environment: dict[str, str] | None = None,
     user: str = "root",
-    attach_stdout: bool = True,
-    attach_stderr: bool = True,
-    tty: bool = False,
-  ) -> str:
-    """Create an exec instance"""
+  ) -> tuple[bytes, int]:
+    """Execute a command and return (output, exit_code)"""
+    # Create exec instance
     config = {
       "AttachStdin": False,
-      "AttachStdout": attach_stdout,
-      "AttachStderr": attach_stderr,
-      "Tty": tty,
+      "AttachStdout": True,
+      "AttachStderr": True,
+      "Tty": False,
       "Cmd": cmd,
       "User": user,
     }
@@ -345,16 +322,16 @@ class DockerClient:
     if environment:
       config["Env"] = [f"{k}={v}" for k, v in environment.items()]
 
-    result = self._request("POST", f"/containers/{container_id}/exec", data=config)
-    return result["Id"]
+    # Create exec instance
+    exec_result = self._request("POST", f"/containers/{container_id}/exec", data=config)
+    exec_id = exec_result["Id"]
 
-  def start_exec(self, exec_id: str, detach: bool = False) -> bytes:
-    """Start an exec instance and return output"""
-    config = {"Detach": detach, "Tty": False}
+    # Start exec and capture output
+    start_config = {"Detach": False, "Tty": False}
 
     conn = UnixHTTPConnection(self.socket_path)
     headers = {"Content-Type": "application/json"}
-    body = json.dumps(config).encode()
+    body = json.dumps(start_config).encode()
 
     try:
       conn.request("POST", f"/exec/{exec_id}/start", body, headers)
@@ -365,45 +342,18 @@ class DockerClient:
         error_msg = json.loads(error_data).get("message", "Unknown error") if error_data else f"HTTP {response.status}"
         raise RuntimeError(f"Docker API error: {error_msg}")
 
-      # For detached mode, return empty bytes
-      if detach:
-        return b""
-
       # Read all output
       output = response.read()
-      return output
     finally:
       conn.close()
 
-  def get_exec_info(self, exec_id: str) -> Dict[str, Any]:
-    """Get exec instance information including exit code"""
-    return self._request("GET", f"/exec/{exec_id}/json")
-
-  def exec_run(
-    self,
-    container_id: str,
-    cmd: List[str],
-    working_dir: Optional[str] = None,
-    environment: Optional[Dict[str, str]] = None,
-    user: str = "root",
-  ) -> tuple[bytes, int]:
-    """Execute a command and return (output, exit_code)"""
-    exec_id = self.create_exec(
-      container_id=container_id,
-      cmd=cmd,
-      working_dir=working_dir,
-      environment=environment,
-      user=user,
-      tty=False,
-    )
-
-    output = self.start_exec(exec_id)
-    exec_info = self.get_exec_info(exec_id)
+    # Get exit code
+    exec_info = self._request("GET", f"/exec/{exec_id}/json")
     exit_code = exec_info.get("ExitCode", 0)
 
     return output, exit_code
 
-  def get_container_logs(self, container_id: str, follow: bool = False, tail: Optional[int] = None) -> bytes:
+  def get_container_logs(self, container_id: str, follow: bool = False, tail: int | None = None) -> bytes:
     """Get container logs"""
     params = {"stdout": "true", "stderr": "true", "timestamps": "true"}
 
@@ -465,41 +415,13 @@ class DockerClient:
 
     return False
 
-  def attach_container(self, container_id: str, stream: bool = True) -> bytes:
-    """Attach to a running container's main process"""
-    params = {"stream": "true" if stream else "false", "stdout": "true", "stderr": "true"}
-
-    conn = UnixHTTPConnection(self.socket_path)
-
-    try:
-      path = f"/containers/{container_id}/attach"
-      if params:
-        path = f"{path}?{urlencode(params)}"
-
-      conn.request("POST", path)
-      response = conn.getresponse()
-
-      if response.status >= 400:
-        error_data = response.read().decode()
-        error_msg = json.loads(error_data).get("message", "Unknown error") if error_data else f"HTTP {response.status}"
-        raise RuntimeError(f"Docker API error: {error_msg}")
-
-      if stream:
-        # For streaming, we'd need to handle this differently
-        # For now, just read available data
-        return response.read()
-      else:
-        return response.read()
-    finally:
-      conn.close()
-
   def create_network(
     self,
     name: str,
     driver: str = "bridge",
-    options: Optional[Dict[str, str]] = None,
-    labels: Optional[Dict[str, str]] = None,
-  ) -> Dict[str, Any]:
+    options: dict[str, str] | None = None,
+    labels: dict[str, str] | None = None,
+  ) -> dict[str, Any]:
     """Create a custom network"""
     data = {"Name": name, "Driver": driver}
 
@@ -513,14 +435,6 @@ class DockerClient:
   def remove_network(self, name: str) -> None:
     """Remove a network"""
     self._request("DELETE", f"/networks/{name}")
-
-  def list_networks(self) -> List[Dict[str, Any]]:
-    """List all networks"""
-    return self._request("GET", "/networks")
-
-  def get_network(self, name: str) -> Dict[str, Any]:
-    """Get network details"""
-    return self._request("GET", f"/networks/{name}")
 
   def connect_container_to_network(self, network_name: str, container_id: str) -> None:
     """Connect container to network"""

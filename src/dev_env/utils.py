@@ -6,7 +6,7 @@ import tempfile
 import socket
 import os
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Any
+from typing import Any
 import hashlib
 import time
 
@@ -36,7 +36,7 @@ def generate_container_name(env_name: str) -> str:
   return f"devenv-{env_name}-{hash_suffix}"
 
 
-def run_command(cmd: List[str], cwd: Optional[Path] = None, capture_output: bool = False) -> Tuple[int, str, str]:
+def run_command(cmd: list[str], cwd: Path | None = None, capture_output: bool = False) -> tuple[int, str, str]:
   """Run a command and return exit code, stdout, stderr"""
   if capture_output:
     result = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -63,7 +63,7 @@ def clone_git_repository(url: str, target: Path, branch: str = "main", shallow: 
     raise RuntimeError(f"Failed to clone repository: {stderr}")
 
 
-def generate_ssh_key_pair() -> Tuple[str, str]:
+def generate_ssh_key_pair() -> tuple[str, str]:
   """Generate an SSH key pair (private, public)"""
   if not shutil.which("ssh-keygen"):
     raise RuntimeError("ssh-keygen is not installed")
@@ -122,7 +122,7 @@ def format_size(size_bytes: int) -> str:
   return f"{size_bytes:.1f} PB"
 
 
-def parse_port_mapping(port_str: str) -> Tuple[int, int]:
+def parse_port_mapping(port_str: str) -> tuple[int, int]:
   """Parse port mapping string (e.g., '8080:80' or '80')"""
   parts = port_str.split(":")
   if len(parts) == 1:
@@ -203,7 +203,7 @@ def wait_for_port(host: str, port: int, timeout: int = 30) -> bool:
   return False
 
 
-def validate_port_mappings(ports: Dict[int, Any]) -> List[str]:
+def validate_port_mappings(ports: dict[int, Any]) -> list[str]:
   """Validate port mappings and return list of warnings/errors"""
   warnings = []
 
@@ -260,12 +260,12 @@ def _is_port_available(host: str, port: int) -> bool:
     return False
 
 
-def validate_bind_mounts(volumes: List) -> List[str]:
+def validate_bind_mounts(volumes: list) -> list[str]:
   """Validate bind mount paths and return warnings"""
   warnings = []
 
   for volume in volumes:
-    if hasattr(volume, "type") and volume.type == "bind":
+    if hasattr(volume, "is_named_volume") and not volume.is_named_volume():
       source_path = Path(volume.source)
 
       # Check if source path exists
@@ -396,7 +396,7 @@ def get_host_ssh_key() -> str:
 
 
 def setup_git_in_container(
-  docker_client, container_id: str, git_config, host_git_config: Optional[Dict[str, str]] = None
+  docker_client, container_id: str, git_config, host_git_config: dict[str, str] | None = None
 ) -> None:
   """Setup Git and clone repository in container"""
   # Install git if not present
@@ -442,7 +442,7 @@ def setup_git_in_container(
     raise RuntimeError(f"Failed to clone repository: {output.decode('utf-8', errors='replace')}")
 
 
-def get_host_git_config() -> Dict[str, str]:
+def get_host_git_config() -> dict[str, str]:
   """Get host Git configuration"""
   config = {}
 
@@ -466,9 +466,9 @@ def get_host_git_config() -> Dict[str, str]:
 
 
 class DevEnvError(Exception):
-  """Base exception for dev-env with actionable remediation"""
+  """Base error with remediation"""
 
-  def __init__(self, message: str, remediation: Optional[str] = None, exit_code: int = 1):
+  def __init__(self, message: str, remediation: str = "", exit_code: int = 1):
     self.message = message
     self.remediation = remediation
     self.exit_code = exit_code
@@ -481,11 +481,40 @@ class DevEnvError(Exception):
     return f"Error: {self.message}"
 
 
-class DockerNotAvailableError(DevEnvError):
-  """Docker is not available or accessible"""
+class ConfigError(DevEnvError):
+  """Configuration-related errors"""
 
-  def __init__(self):
-    super().__init__(
+  @classmethod
+  def environment_exists(cls, env_name: str):
+    return cls(
+      f"Environment '{env_name}' already exists",
+      f"To recreate the environment:\n"
+      f"  • Remove existing: python -m dev_env down {env_name}\n"
+      f"  • Or use a different name: python -m dev_env up <config> --name {env_name}-new",
+    )
+
+  @classmethod
+  def environment_not_found(cls, env_name: str):
+    return cls(f"Environment '{env_name}' not found", "List available environments: python -m dev_env list")
+
+  @classmethod
+  def ssh_not_enabled(cls, env_name: str):
+    return cls(
+      f"Environment '{env_name}' does not have SSH enabled",
+      'To enable SSH, ensure port 22 is exposed in your configuration:\n  ports = {22: {"HostPort": 2222}}',
+    )
+
+  @classmethod
+  def security_violation(cls, message: str):
+    return cls(message, "To override security restrictions, see: docs/security.md", exit_code=2)
+
+
+class DockerError(DevEnvError):
+  """Docker operation errors"""
+
+  @classmethod
+  def daemon_unavailable(cls):
+    return cls(
       "Docker daemon is not accessible",
       "Please ensure Docker is installed and running:\n"
       "  • macOS: Start Docker Desktop\n"
@@ -493,41 +522,16 @@ class DockerNotAvailableError(DevEnvError):
       "  • Check permissions: sudo usermod -aG docker $USER (requires logout/login)",
     )
 
-
-class EnvironmentExistsError(DevEnvError):
-  """Environment already exists"""
-
-  def __init__(self, env_name: str):
-    super().__init__(
-      f"Environment '{env_name}' already exists",
-      f"To recreate the environment:\n"
-      f"  • Remove existing: python -m dev_env down {env_name}\n"
-      f"  • Or use a different name: python -m dev_env up <config> --name {env_name}-new",
-    )
-
-
-class EnvironmentNotFoundError(DevEnvError):
-  """Environment not found"""
-
-  def __init__(self, env_name: str):
-    super().__init__(f"Environment '{env_name}' not found", "List available environments: python -m dev_env list")
-
-
-class ContainerNotRunningError(DevEnvError):
-  """Container is not running"""
-
-  def __init__(self, env_name: str):
-    super().__init__(
+  @classmethod
+  def container_not_running(cls, env_name: str):
+    return cls(
       f"Environment '{env_name}' is not running",
       f"Start the environment: python -m dev_env up <config> --name {env_name}",
     )
 
-
-class ImagePullError(DevEnvError):
-  """Image pull failed"""
-
-  def __init__(self, image: str, original_error: str):
-    super().__init__(
+  @classmethod
+  def image_pull_failed(cls, image: str, original_error: str):
+    return cls(
       f"Failed to pull image '{image}': {original_error}",
       "Try these solutions:\n"
       "  • Check image name spelling\n"
@@ -537,22 +541,14 @@ class ImagePullError(DevEnvError):
     )
 
 
-class SSHNotEnabledError(DevEnvError):
-  """SSH is not enabled for environment"""
-
-  def __init__(self, env_name: str):
-    super().__init__(
-      f"Environment '{env_name}' does not have SSH enabled",
-      'To enable SSH, ensure port 22 is exposed in your configuration:\n  ports = {22: {"HostPort": 2222}}',
-    )
-
-
-class SecurityError(DevEnvError):
-  """Security-related errors with remediation guidance"""
-
-  def __init__(self, message: str):
-    remediation = "To override security restrictions, see: docs/security.md"
-    super().__init__(message, remediation, exit_code=2)
+# Compatibility aliases for old error names (for tests)
+DockerNotAvailableError = lambda: DockerError.daemon_unavailable()
+EnvironmentExistsError = lambda env_name: ConfigError.environment_exists(env_name)
+EnvironmentNotFoundError = lambda env_name: ConfigError.environment_not_found(env_name)
+ContainerNotRunningError = lambda env_name: DockerError.container_not_running(env_name)
+ImagePullError = lambda image, error: DockerError.image_pull_failed(image, error)
+SSHNotEnabledError = lambda env_name: ConfigError.ssh_not_enabled(env_name)
+SecurityError = lambda message: ConfigError.security_violation(message)
 
 
 # Forbidden mount paths for security
@@ -571,13 +567,13 @@ FORBIDDEN_MOUNT_PATHS = [
 ]
 
 
-def validate_volume_security(volumes: List) -> None:
+def validate_volume_security(volumes: list) -> None:
   """Validate volume mounts for security violations"""
   if not volumes:
     return
 
   for volume in volumes:
-    if hasattr(volume, "type") and volume.type == "bind":
+    if hasattr(volume, "is_named_volume") and not volume.is_named_volume():
       source_path_str = str(volume.source)
 
       # Skip validation for relative paths and named volumes
@@ -592,7 +588,7 @@ def validate_volume_security(volumes: List) -> None:
         # Check if source path starts with or is exactly a forbidden path
         try:
           source_path.relative_to(forbidden_path)
-          raise SecurityError(
+          raise ConfigError.security_violation(
             f"Cannot mount {forbidden}: security violation. Mounting system directories can compromise host security."
           )
         except ValueError:
@@ -600,7 +596,7 @@ def validate_volume_security(volumes: List) -> None:
           continue
 
 
-def validate_port_security(ports: Dict[int, Any]) -> None:
+def validate_port_security(ports: dict[int, Any]) -> None:
   """Validate port mappings for security issues"""
   if not ports:
     return
@@ -615,7 +611,7 @@ def validate_port_security(ports: Dict[int, Any]) -> None:
 
       # Reject all-interface binding for security
       elif host_ip == "0.0.0.0":
-        raise SecurityError(
+        raise ConfigError.security_violation(
           f"Port {container_port} cannot bind to all interfaces (0.0.0.0). "
           "Use '127.0.0.1' for localhost-only access or specify a specific interface."
         )
@@ -631,17 +627,7 @@ def apply_security_defaults(environment) -> None:
   if environment.ports:
     validate_port_security(environment.ports)
 
-  # Ensure security config exists
-  if not environment.security:
-    from .config import SecurityConfig
-
-    environment.security = SecurityConfig()
-
-  # Ensure resource config exists
-  if not environment.resources:
-    from .config import ResourceConfig
-
-    environment.resources = ResourceConfig()
+  # Note: Security and resource configs are now part of Environment defaults
 
 
 def format_security_message(level: str, message: str) -> str:

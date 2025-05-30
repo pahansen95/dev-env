@@ -1,7 +1,6 @@
 """Test configuration and fixtures for dev-env"""
 
 import tempfile
-import json
 from pathlib import Path
 from unittest.mock import Mock, patch
 import pytest
@@ -82,22 +81,6 @@ config = Environment(
 )
 '''
   config_file.write_text(config_content)
-  return config_file
-
-
-@pytest.fixture
-def sample_json_config(temp_dir):
-  """Create a sample JSON configuration file"""
-  config_file = temp_dir / "test_config.json"
-  config_data = {
-    "name": "json-env",
-    "base_image": "ubuntu:22.04",
-    "command": ["bash", "-c", "sleep infinity"],
-    "ports": {"80": 8080},
-    "environment": {"ENV": "test"},
-    "volumes": [{"name": "data", "source": "data-vol", "target": "/data", "type": "named"}],
-  }
-  config_file.write_text(json.dumps(config_data, indent=2))
   return config_file
 
 

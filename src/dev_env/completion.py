@@ -16,7 +16,7 @@ _dev_env_completion() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     
     # Main commands
-    local commands="up down list exec ssh logs attach"
+    local commands="up down list exec ssh logs"
     
     case $COMP_CWORD in
         1)
@@ -26,10 +26,10 @@ _dev_env_completion() {
         2)
             case "$prev" in
                 up)
-                    # Complete config files (.py or .json)
-                    COMPREPLY=($(compgen -f -X '!*.@(py|json)' -- "$cur"))
+                    # Complete config files (.py only)
+                    COMPREPLY=($(compgen -f -X '!*.py' -- "$cur"))
                     ;;
-                down|exec|ssh|logs|attach)
+                down|exec|ssh|logs)
                     # Complete environment names
                     local envs=$(_dev_env_list_environments)
                     COMPREPLY=($(compgen -W "$envs" -- "$cur"))
@@ -109,7 +109,7 @@ _dev_env() {
                 up)
                     _arguments \
                         '--name[Override environment name]:name:' \
-                        '*:config file:_files -g "*.py *.json"'
+                        '*:config file:_files -g "*.py"'
                     ;;
                 down)
                     _arguments \
@@ -136,10 +136,6 @@ _dev_env() {
                         '--tail[Number of lines to show]:lines:(10 50 100 500)' \
                         '*:environment name:_dev_env_environments'
                     ;;
-                attach)
-                    _arguments \
-                        '*:environment name:_dev_env_environments'
-                    ;;
             esac
             ;;
     esac
@@ -153,7 +149,6 @@ _dev_env_commands() {
         'exec:Execute command in environment'
         'ssh:SSH into environment'
         'logs:Show container logs'
-        'attach:Attach to environment main process'
     )
     _describe 'commands' commands
 }
@@ -206,7 +201,6 @@ complete -c dev-env -n "__fish_use_subcommand" -a "list" -d "List all environmen
 complete -c dev-env -n "__fish_use_subcommand" -a "exec" -d "Execute command in environment"
 complete -c dev-env -n "__fish_use_subcommand" -a "ssh" -d "SSH into environment"
 complete -c dev-env -n "__fish_use_subcommand" -a "logs" -d "Show container logs"
-complete -c dev-env -n "__fish_use_subcommand" -a "attach" -d "Attach to environment main process"
 
 # Global options
 complete -c dev-env -l version -d "Show version"
@@ -214,7 +208,7 @@ complete -c dev-env -l state-dir -d "Directory for storing environment state" -r
 
 # up command
 complete -c dev-env -n "__fish_seen_subcommand_from up" -l name -d "Override environment name" -r
-complete -c dev-env -n "__fish_seen_subcommand_from up" -F -a "*.py *.json" -d "Configuration file"
+complete -c dev-env -n "__fish_seen_subcommand_from up" -F -a "*.py" -d "Configuration file"
 
 # down command
 complete -c dev-env -n "__fish_seen_subcommand_from down" -l volumes -d "Also remove volumes"
@@ -232,8 +226,6 @@ complete -c dev-env -n "__fish_seen_subcommand_from logs" -f -a "(__dev_env_list
 complete -c dev-env -n "__fish_seen_subcommand_from logs" -s f -l follow -d "Follow log output"
 complete -c dev-env -n "__fish_seen_subcommand_from logs" -l tail -d "Number of lines to show" -r -a "10 50 100 500"
 
-# attach command
-complete -c dev-env -n "__fish_seen_subcommand_from attach" -f -a "(__dev_env_list_environments)" -d "Environment name"
 
 # Also complete for python -m dev_env
 complete -c python3 -n "contains -- '-m' (commandline -opc); and contains -- 'dev_env' (commandline -opc)" -w dev-env
