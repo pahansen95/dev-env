@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import List, Dict, Optional, Any
+from enum import Enum
 import json
 import importlib.util
 import sys
@@ -68,6 +69,110 @@ class NetworkConfig:
       raise ValueError(f"Invalid network driver: {self.driver}")
 
 
+class SecurityLevel(Enum):
+  """Security preset levels"""
+
+  RELAXED = "relaxed"  # Compatibility mode
+  STANDARD = "standard"  # Recommended defaults
+
+
+@dataclass
+class SecurityConfig:
+  """Security configuration for containers"""
+
+  user: str = "1000:1000"
+  drop_capabilities: List[str] = field(default_factory=lambda: ["ALL"])
+  add_capabilities: List[str] = field(default_factory=list)
+  no_new_privileges: bool = True
+  read_only_root_fs: bool = False
+
+  def __post_init__(self):
+    # Validate user format - allow both "uid:gid" and username formats
+    if self.user and ":" in self.user:
+      parts = self.user.split(":")
+      if len(parts) > 2:
+        raise ValueError(f"Invalid user format: {self.user}. Expected 'uid:gid' or 'username:groupname'")
+
+
+@dataclass
+class ResourceConfig:
+  """Resource constraints for containers"""
+
+  memory: Optional[str] = "2g"  # Memory limit
+  cpus: Optional[float] = 2.0  # CPU limit
+  pids_limit: int = 1000  # Process limit
+
+  def __post_init__(self):
+    # Validate memory format
+    if self.memory:
+      self._parse_memory(self.memory)
+
+    # Validate CPU limits
+    if self.cpus is not None and self.cpus <= 0:
+      raise ValueError(f"Invalid CPU limit: {self.cpus}")
+
+    if self.pids_limit <= 0:
+      raise ValueError(f"Invalid PID limit: {self.pids_limit}")
+
+  def _parse_memory(self, memory: str) -> int:
+    """Parse memory string to bytes"""
+    memory = memory.lower().strip()
+
+    multipliers = {
+      "b": 1,
+      "k": 1024,
+      "kb": 1024,
+      "m": 1024**2,
+      "mb": 1024**2,
+      "g": 1024**3,
+      "gb": 1024**3,
+      "t": 1024**4,
+      "tb": 1024**4,
+    }
+
+    # Extract numeric part and suffix
+    import re
+
+    match = re.match(r"^(\d+(?:\.\d+)?)\s*([a-z]*)$", memory)
+    if not match:
+      raise ValueError(f"Invalid memory format: {memory}")
+
+    number, suffix = match.groups()
+    number = float(number)
+
+    # Empty suffix defaults to bytes
+    if not suffix:
+      suffix = "b"
+
+    if suffix not in multipliers:
+      raise ValueError(f"Invalid memory suffix: {suffix}")
+
+    return int(number * multipliers[suffix])
+
+  def to_docker_config(self) -> Dict[str, Any]:
+    """Convert to Docker host config format"""
+    config = {}
+
+    if self.memory:
+      config["Memory"] = self._parse_memory(self.memory)
+
+    if self.cpus is not None:
+      config["CpuQuota"] = int(self.cpus * 100000)
+      config["CpuPeriod"] = 100000
+
+    if self.pids_limit:
+      config["PidsLimit"] = self.pids_limit
+
+    return config
+
+
+# Security presets
+SECURITY_PRESETS = {
+  SecurityLevel.RELAXED: SecurityConfig(user="root", drop_capabilities=[], no_new_privileges=False),
+  SecurityLevel.STANDARD: SecurityConfig(user="1000:1000", drop_capabilities=["ALL"], no_new_privileges=True),
+}
+
+
 @dataclass
 class Environment:
   """Development environment configuration"""
@@ -82,12 +187,25 @@ class Environment:
   ssh: Optional[SSHConfig] = None
   network: Optional[NetworkConfig] = None
   labels: Optional[Dict[str, str]] = None
+  security: Optional[SecurityConfig] = None
+  resources: Optional[ResourceConfig] = None
+  security_level: Optional[SecurityLevel] = None
 
   def __post_init__(self):
     if not self.name:
       raise ValueError("Environment name is required")
     if not self.base_image:
       raise ValueError("Base image is required")
+
+    # Apply security preset if specified
+    if self.security_level and not self.security:
+      self.security = SECURITY_PRESETS[self.security_level]
+
+    # Apply defaults
+    if not self.security:
+      self.security = SecurityConfig()
+    if not self.resources:
+      self.resources = ResourceConfig()
 
     # Add SSH port mapping if SSH is configured
     if self.ssh:
@@ -112,6 +230,15 @@ class Environment:
       data["ssh"] = SSHConfig(**data["ssh"]) if isinstance(data["ssh"], dict) else data["ssh"]
     if "network" in data and data["network"]:
       data["network"] = NetworkConfig(**data["network"]) if isinstance(data["network"], dict) else data["network"]
+    if "security" in data and data["security"]:
+      data["security"] = SecurityConfig(**data["security"]) if isinstance(data["security"], dict) else data["security"]
+    if "resources" in data and data["resources"]:
+      data["resources"] = (
+        ResourceConfig(**data["resources"]) if isinstance(data["resources"], dict) else data["resources"]
+      )
+    if "security_level" in data and data["security_level"]:
+      if isinstance(data["security_level"], str):
+        data["security_level"] = SecurityLevel(data["security_level"])
 
     return cls(**data)
 

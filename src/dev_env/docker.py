@@ -65,6 +65,8 @@ class DockerClient:
     volumes: Optional[Dict[str, Dict]] = None,
     ports: Optional[Dict[str, Any]] = None,
     network: Optional[str] = None,
+    security: Optional[Any] = None,
+    resources: Optional[Any] = None,
   ) -> str:
     """Create a new container"""
     config = {
@@ -77,15 +79,49 @@ class DockerClient:
       "OpenStdin": True,
     }
 
+    # Apply security configuration
+    if security:
+      config["User"] = security.user
+
+      # Security options
+      security_opts = []
+      if security.no_new_privileges:
+        security_opts.append("no-new-privileges:true")
+      if security_opts:
+        config["SecurityOpt"] = security_opts
+
+      # Read-only root filesystem
+      if security.read_only_root_fs:
+        config["ReadonlyRootfs"] = True
+
     if command:
       config["Cmd"] = command
 
     if environment:
       config["Env"] = [f"{k}={v}" for k, v in environment.items()]
 
+    # Initialize HostConfig for resource and security constraints
+    host_config = {}
+
+    # Apply resource configuration
+    if resources:
+      resource_config = resources.to_docker_config()
+      host_config.update(resource_config)
+
+    # Apply security capabilities
+    if security:
+      if security.drop_capabilities:
+        host_config["CapDrop"] = security.drop_capabilities
+      if security.add_capabilities:
+        host_config["CapAdd"] = security.add_capabilities
+
     if volumes:
       config["Volumes"] = {v: {} for v in volumes.keys()}
-      config["HostConfig"] = {"Binds": [f"{k}:{v['bind']}:{v.get('mode', 'rw')}" for k, v in volumes.items()]}
+      if "HostConfig" not in config:
+        config["HostConfig"] = host_config
+      config["HostConfig"]["Binds"] = [f"{k}:{v['bind']}:{v.get('mode', 'rw')}" for k, v in volumes.items()]
+    elif host_config:
+      config["HostConfig"] = host_config
 
     if ports:
       exposed_ports = {}
@@ -98,13 +134,13 @@ class DockerClient:
           ]
       config["ExposedPorts"] = exposed_ports
       if "HostConfig" not in config:
-        config["HostConfig"] = {}
+        config["HostConfig"] = host_config
       config["HostConfig"]["PortBindings"] = port_bindings
 
     # Configure networking
     if network:
       if "HostConfig" not in config:
-        config["HostConfig"] = {}
+        config["HostConfig"] = host_config
       config["HostConfig"]["NetworkMode"] = network
 
       # For custom networks, also add to NetworkingConfig

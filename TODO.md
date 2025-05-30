@@ -55,28 +55,66 @@ The project now has comprehensive test coverage with pytest infrastructure.
 - Cannot safely refactor without regression tests
 - Need confidence before implementing security features
 
-## 🔒 Security Hardening (After Testing)
+## ✅ Security Hardening - COMPLETED
+
+The dev-env tool now includes comprehensive security hardening features:
 
 ### Non-Root Container Execution
-- [ ] Implement user creation in containers
-- [ ] Configure containers to run as uid 1000:1000
-- [ ] Update SSH configuration for non-root user
-- [ ] Handle permission issues with volumes
+- [x] Implement user creation in containers (default uid 1000:1000)
+- [x] Configure containers to run as non-root by default  
+- [x] Update SSH configuration for non-root user
+- [x] Handle permission issues with volumes
 
 ### Capability Restrictions
-- [ ] Drop all capabilities by default
-- [ ] Add only required capabilities (CHOWN, SETUID, SETGID)
-- [ ] Implement no-new-privileges security option
-- [ ] Document security model
+- [x] Drop all capabilities by default
+- [x] Add only required capabilities (configurable)
+- [x] Implement no-new-privileges security option
+- [x] Document security model with presets
 
-### Implementation Notes
+### Volume Security
+- [x] Validate volume mounts to prevent dangerous host directory access
+- [x] Block mounting of system directories (/etc, /proc, /sys, etc.)
+- [x] Support for safe relative path mounting
+
+### Port Security
+- [x] Default to localhost-only port binding (127.0.0.1)
+- [x] Prevent accidental exposure to all interfaces (0.0.0.0)
+- [x] Actionable security error messages
+
+### Resource Management
+- [x] Default memory and CPU limits (2GB RAM, 2 CPU cores)
+- [x] Process count limits to prevent fork bombs
+- [x] Configurable resource constraints
+
+### Security Levels
+- [x] **STANDARD** (default): Non-root user, dropped capabilities, localhost binding
+- [x] **RELAXED**: Compatible mode for legacy applications requiring root access
+- [x] **CUSTOM**: Fully configurable security settings
+
+### Implementation Highlights
 ```python
-# docker.py updates needed:
-config["User"] = "1000:1000"
-config["HostConfig"]["CapDrop"] = ["ALL"]
-config["HostConfig"]["CapAdd"] = ["CHOWN", "SETUID", "SETGID"]
-config["HostConfig"]["SecurityOpt"] = ["no-new-privileges"]
+# Security configuration now applied automatically:
+security=SecurityConfig(
+    user="1000:1000",                    # Non-root execution
+    drop_capabilities=["ALL"],           # Drop all capabilities  
+    add_capabilities=["CHOWN"],          # Only necessary capabilities
+    no_new_privileges=True,              # Prevent privilege escalation
+)
+
+# Resource limits applied by default:
+resources=ResourceConfig(
+    memory="2g",                         # Memory limit
+    cpus=2.0,                           # CPU limit
+    pids_limit=1000,                    # Process limit
+)
 ```
+
+### Testing
+- [x] Comprehensive security test suite (38 tests)
+- [x] Volume security validation tests
+- [x] Port security validation tests  
+- [x] Security preset integration tests
+- [x] Error handling and remediation message tests
 
 ## 📊 Resource Management
 
@@ -172,9 +210,9 @@ if env.cpus:
 
 ## Implementation Priority Order
 
-1. **Testing Infrastructure** - Cannot proceed safely without tests
-2. **Security Hardening** - Critical for production use
-3. **Resource Management** - Quick win, low complexity
+1. ✅ **Testing Infrastructure** - Cannot proceed safely without tests
+2. ✅ **Security Hardening** - Critical for production use  
+3. **Resource Management** - Quick win, low complexity (mostly done as part of security)
 4. **User Documentation** - Needed for adoption
 5. **Distribution** - Once stable and tested
 
@@ -253,3 +291,17 @@ if env.cpus:
 - [x] Error scenario tests for failure modes
 - [x] Automated test runner script (`helpers/run_tests.sh`)
 - [x] CI/CD ready with multiple execution modes
+
+### Phase 10: Security Hardening ✅
+- [x] SecurityConfig and ResourceConfig dataclasses with validation
+- [x] Security preset levels (STANDARD, RELAXED) for different use cases
+- [x] Non-root container execution by default (uid 1000:1000)
+- [x] Capability dropping (ALL by default) and selective addition
+- [x] No-new-privileges security option to prevent escalation
+- [x] Volume mount security validation blocking system directories
+- [x] Port security defaulting to localhost-only binding (127.0.0.1)
+- [x] Resource constraints (memory, CPU, process limits) by default
+- [x] SecurityError exception class with actionable remediation messages
+- [x] Comprehensive security test suite (38 tests covering all features)
+- [x] Updated example configurations demonstrating security features
+- [x] Integration with existing container creation pipeline

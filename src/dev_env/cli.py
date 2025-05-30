@@ -14,6 +14,7 @@ from .utils import (
   generate_container_name,
   validate_port_mappings,
   validate_bind_mounts,
+  apply_security_defaults,
   DevEnvError,
   DockerNotAvailableError,
   EnvironmentExistsError,
@@ -21,6 +22,7 @@ from .utils import (
   ContainerNotRunningError,
   ImagePullError,
   SSHNotEnabledError,
+  SecurityError,
 )
 
 
@@ -35,6 +37,11 @@ def cmd_up(args: argparse.Namespace) -> int:
   # Load configuration
   try:
     env = load_environment(args.config)
+    # Apply security defaults and validate
+    apply_security_defaults(env)
+  except SecurityError as e:
+    print(e.format_error(), file=sys.stderr)
+    return e.exit_code
   except Exception as e:
     print(f"Error loading configuration: {e}", file=sys.stderr)
     return 1
@@ -143,6 +150,8 @@ def cmd_up(args: argparse.Namespace) -> int:
       volumes=volumes,
       ports=env.ports,
       network=network_name,
+      security=env.security,
+      resources=env.resources,
     )
 
     # Start container

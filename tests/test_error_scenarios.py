@@ -202,11 +202,11 @@ config = Environment(name="big", base_image="python:3.13")
     """Test handling of volume creation failures"""
     config_file = temp_dir / "volume_fail.py"
     config_file.write_text("""
-from dev_env.config import Environment, VolumeConfig
+from dev_env.config import Environment, VolumeMount
 config = Environment(
     name="vol-test",
     base_image="python:3.13",
-    volumes=[VolumeConfig(name="data", source="test-vol", target="/data", type="named")]
+    volumes=[VolumeMount(source="test-vol", target="/data", type="named", name="data")]
 )
 """)
 

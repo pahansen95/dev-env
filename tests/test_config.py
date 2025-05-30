@@ -5,12 +5,10 @@ import pytest
 
 from dev_env.config import (
   Environment,
-  VolumeConfig,
+  VolumeMount,
   GitConfig,
   NetworkConfig,
   load_environment,
-  parse_port_mapping,
-  parse_volume_mapping,
 )
 
 
@@ -60,12 +58,12 @@ class TestEnvironmentConfig:
     assert isinstance(env_dict["git"], dict)
 
 
-class TestVolumeConfig:
-  """Test VolumeConfig dataclass"""
+class TestVolumeMount:
+  """Test VolumeMount dataclass"""
 
   def test_named_volume(self):
     """Test named volume configuration"""
-    vol = VolumeConfig(name="data", source="data-vol", target="/data", type="named")
+    vol = VolumeMount(source="data-vol", target="/data", type="named", name="data")
     assert vol.name == "data"
     assert vol.source == "data-vol"
     assert vol.target == "/data"
@@ -74,19 +72,19 @@ class TestVolumeConfig:
 
   def test_bind_volume(self):
     """Test bind mount configuration"""
-    vol = VolumeConfig(name="bind", source="/host/path", target="/container/path", type="bind", mode="ro")
+    vol = VolumeMount(source="/host/path", target="/container/path", type="bind", mode="ro")
     assert vol.type == "bind"
     assert vol.mode == "ro"
 
   def test_volume_validation_post_init(self):
     """Test volume validation in __post_init__"""
     # Valid named volume
-    vol = VolumeConfig(name="test", source="vol", target="/data", type="named")
-    assert vol.name == "test"
+    vol = VolumeMount(source="vol", target="/data", type="named")
+    assert vol.name == "vol"  # auto-named from source
 
     # Valid bind mount
-    vol = VolumeConfig(name="bind", source="/tmp", target="/tmp", type="bind")
-    assert vol.name == "bind"
+    vol = VolumeMount(source="/tmp", target="/tmp", type="bind")
+    assert vol.type == "bind"
 
 
 class TestGitConfig:
@@ -184,86 +182,3 @@ class TestConfigurationLoading:
 
     with pytest.raises(ValueError, match="Unsupported"):
       load_environment(unsupported)
-
-
-class TestPortMapping:
-  """Test port mapping parsing"""
-
-  def test_parse_port_mapping_int_to_int(self):
-    """Test parsing integer port to integer port"""
-    result = parse_port_mapping({8080: 80})
-    assert result == {8080: {"HostPort": "80"}}
-
-  def test_parse_port_mapping_str_to_str(self):
-    """Test parsing string port to string port"""
-    result = parse_port_mapping({"8080": "80"})
-    assert result == {"8080": {"HostPort": "80"}}
-
-  def test_parse_port_mapping_int_to_str(self):
-    """Test parsing integer port to string port"""
-    result = parse_port_mapping({8080: "80"})
-    assert result == {8080: {"HostPort": "80"}}
-
-  def test_parse_port_mapping_complex(self):
-    """Test parsing complex port mapping"""
-    ports = {22: 2222, "80": "8080", 443: {"HostPort": "4443", "HostIp": "127.0.0.1"}}
-    result = parse_port_mapping(ports)
-
-    assert result[22] == {"HostPort": "2222"}
-    assert result["80"] == {"HostPort": "8080"}
-    assert result[443] == {"HostPort": "4443", "HostIp": "127.0.0.1"}
-
-  def test_parse_port_mapping_empty(self):
-    """Test parsing empty port mapping"""
-    result = parse_port_mapping({})
-    assert result == {}
-
-  def test_parse_port_mapping_none(self):
-    """Test parsing None port mapping"""
-    result = parse_port_mapping(None)
-    assert result == {}
-
-
-class TestVolumeMapping:
-  """Test volume mapping parsing"""
-
-  def test_parse_volume_mapping_list(self):
-    """Test parsing list of VolumeConfig objects"""
-    volumes = [
-      VolumeConfig(name="data", source="data-vol", target="/data", type="named"),
-      VolumeConfig(name="bind", source="/tmp", target="/tmp", type="bind", mode="ro"),
-    ]
-    result = parse_volume_mapping(volumes)
-
-    assert "data-vol" in result
-    assert result["data-vol"] == {"bind": "/data", "mode": "rw"}
-    assert "/tmp" in result
-    assert result["/tmp"] == {"bind": "/tmp", "mode": "ro"}
-
-  def test_parse_volume_mapping_empty(self):
-    """Test parsing empty volume list"""
-    result = parse_volume_mapping([])
-    assert result == {}
-
-  def test_parse_volume_mapping_none(self):
-    """Test parsing None volume list"""
-    result = parse_volume_mapping(None)
-    assert result == {}
-
-  def test_parse_volume_mapping_named_volume(self):
-    """Test parsing named volume specifically"""
-    volumes = [VolumeConfig(name="db", source="postgres-data", target="/var/lib/postgresql/data", type="named")]
-    result = parse_volume_mapping(volumes)
-
-    assert "postgres-data" in result
-    assert result["postgres-data"]["bind"] == "/var/lib/postgresql/data"
-    assert result["postgres-data"]["mode"] == "rw"
-
-  def test_parse_volume_mapping_bind_mount(self):
-    """Test parsing bind mount specifically"""
-    volumes = [VolumeConfig(name="src", source="/host/src", target="/app", type="bind", mode="ro")]
-    result = parse_volume_mapping(volumes)
-
-    assert "/host/src" in result
-    assert result["/host/src"]["bind"] == "/app"
-    assert result["/host/src"]["mode"] == "ro"

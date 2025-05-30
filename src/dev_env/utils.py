@@ -545,3 +545,105 @@ class SSHNotEnabledError(DevEnvError):
       f"Environment '{env_name}' does not have SSH enabled",
       'To enable SSH, ensure port 22 is exposed in your configuration:\n  ports = {22: {"HostPort": 2222}}',
     )
+
+
+class SecurityError(DevEnvError):
+  """Security-related errors with remediation guidance"""
+
+  def __init__(self, message: str):
+    remediation = "To override security restrictions, see: docs/security.md"
+    super().__init__(message, remediation, exit_code=2)
+
+
+# Forbidden mount paths for security
+FORBIDDEN_MOUNT_PATHS = [
+  "/",  # Root filesystem
+  "/etc",  # System configuration
+  "/var/run/docker.sock",  # Docker socket
+  "/proc",  # Process information
+  "/sys",  # Kernel interfaces
+  "/dev",  # Device files
+  "/boot",  # Boot files
+  "/usr/bin",  # System binaries
+  "/usr/sbin",  # System binaries
+  "/bin",  # System binaries
+  "/sbin",  # System binaries
+]
+
+
+def validate_volume_security(volumes: List) -> None:
+  """Validate volume mounts for security violations"""
+  if not volumes:
+    return
+
+  for volume in volumes:
+    if hasattr(volume, "type") and volume.type == "bind":
+      source_path_str = str(volume.source)
+
+      # Skip validation for relative paths and named volumes
+      if not source_path_str.startswith("/"):
+        continue
+
+      source_path = Path(source_path_str).resolve()
+
+      for forbidden in FORBIDDEN_MOUNT_PATHS:
+        forbidden_path = Path(forbidden).resolve()
+
+        # Check if source path starts with or is exactly a forbidden path
+        try:
+          source_path.relative_to(forbidden_path)
+          raise SecurityError(
+            f"Cannot mount {forbidden}: security violation. Mounting system directories can compromise host security."
+          )
+        except ValueError:
+          # Not under forbidden path, continue checking
+          continue
+
+
+def validate_port_security(ports: Dict[int, Any]) -> None:
+  """Validate port mappings for security issues"""
+  if not ports:
+    return
+
+  for container_port, host_config in ports.items():
+    if isinstance(host_config, dict):
+      host_ip = host_config.get("HostIp", "")
+
+      # Force localhost binding if not specified
+      if not host_ip:
+        host_config["HostIp"] = "127.0.0.1"
+
+      # Reject all-interface binding for security
+      elif host_ip == "0.0.0.0":
+        raise SecurityError(
+          f"Port {container_port} cannot bind to all interfaces (0.0.0.0). "
+          "Use '127.0.0.1' for localhost-only access or specify a specific interface."
+        )
+
+
+def apply_security_defaults(environment) -> None:
+  """Apply security defaults and validate configuration"""
+  # Validate volume mounts
+  if environment.volumes:
+    validate_volume_security(environment.volumes)
+
+  # Validate port mappings
+  if environment.ports:
+    validate_port_security(environment.ports)
+
+  # Ensure security config exists
+  if not environment.security:
+    from .config import SecurityConfig
+
+    environment.security = SecurityConfig()
+
+  # Ensure resource config exists
+  if not environment.resources:
+    from .config import ResourceConfig
+
+    environment.resources = ResourceConfig()
+
+
+def format_security_message(level: str, message: str) -> str:
+  """Format security-related messages consistently"""
+  return f"🔒 Security {level.upper()}: {message}"
