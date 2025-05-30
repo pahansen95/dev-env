@@ -605,6 +605,10 @@ def validate_volume_security(volumes: list) -> None:
         forbidden_path = Path(forbidden).resolve()
 
         # Check if source path starts with or is exactly a forbidden path
+        # Special case: allow mounting under / as long as it's not exactly /
+        if forbidden == "/" and source_path != forbidden_path:
+          continue
+
         try:
           source_path.relative_to(forbidden_path)
           raise ConfigError.security_violation(

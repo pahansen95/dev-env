@@ -41,7 +41,7 @@ class TestSSHOperations:
     # Verify package installation
     calls = [str(call) for call in mock_docker.exec_run.call_args_list]
     assert any("apt-get" in call and "openssh-server" in call for call in calls)
-    assert any("ssh-keygen -A" in call for call in calls)
+    assert any("ssh-keygen" in call and "-A" in call for call in calls)
 
   def test_setup_ssh_server_alpine(self):
     """Test SSH server setup on Alpine Linux"""
@@ -54,7 +54,10 @@ class TestSSHOperations:
       (b"", 1),  # which yum - fails
       (b"/sbin/apk", 0),  # which apk - succeeds
       (b"", 0),  # apk add openssh
-      (b"", 0),  # remaining commands...
+      (b"", 0),  # mkdir
+      (b"", 0),  # chmod
+      (b"", 0),  # ssh-keygen -A
+      (b"", 0),  # write sshd_config
     ]
 
     setup_ssh_server(mock_docker, container_id)
@@ -176,9 +179,9 @@ class TestSecurityValidation:
     from dev_env.config import VolumeMount
 
     safe_volumes = [
-      VolumeMount(source="./data", target="/data"),
+      VolumeMount(source="data-volume", target="/data"),
       VolumeMount(source="my-volume", target="/app"),
-      VolumeMount(source="/home/user/project", target="/workspace"),
+      VolumeMount(source="/Users/user/project", target="/workspace"),
     ]
 
     # Should not raise

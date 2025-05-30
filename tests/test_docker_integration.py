@@ -127,6 +127,7 @@ class TestDockerRealIntegration:
 
 @pytest.mark.slow
 @pytest.mark.integration
+@pytest.mark.skipif(not check_docker_available(), reason="Docker not available")
 class TestEndToEndWorkflow:
   """Complete end-to-end workflow tests"""
 
