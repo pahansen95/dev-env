@@ -125,7 +125,7 @@ config = Environment(
       mock_docker_class.return_value = mock_docker
 
       # Test exec command
-      exec_args = Namespace(name="test-env", command=["echo", "Hello, World!"], state_dir=Path("/tmp"))
+      exec_args = Namespace(name="test-env", exec_command=["echo", "Hello, World!"], state_dir=Path("/tmp"))
       result = cmd_exec(exec_args)
       assert result == 0
 

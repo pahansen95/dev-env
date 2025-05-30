@@ -14,10 +14,10 @@ _dev_env_completion() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    
+
     # Main commands
     local commands="up down list exec ssh logs"
-    
+
     case $COMP_CWORD in
         1)
             # Complete main commands
@@ -46,7 +46,7 @@ _dev_env_completion() {
             esac
             ;;
     esac
-    
+
     # Handle flags
     case "$prev" in
         --name)
@@ -95,14 +95,14 @@ def generate_zsh_completion() -> str:
 _dev_env() {
     local context state state_descr line
     typeset -A opt_args
-    
+
     _arguments -C \
         '--version[Show version]' \
         '--state-dir[Directory for storing environment state]:state directory:_directories' \
         '1: :_dev_env_commands' \
         '*:: :->args' \
         && return 0
-    
+
     case $state in
         args)
             case $words[1] in

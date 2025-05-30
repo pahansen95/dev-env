@@ -542,13 +542,32 @@ class DockerError(DevEnvError):
 
 
 # Compatibility aliases for old error names (for tests)
-DockerNotAvailableError = lambda: DockerError.daemon_unavailable()
-EnvironmentExistsError = lambda env_name: ConfigError.environment_exists(env_name)
-EnvironmentNotFoundError = lambda env_name: ConfigError.environment_not_found(env_name)
-ContainerNotRunningError = lambda env_name: DockerError.container_not_running(env_name)
-ImagePullError = lambda image, error: DockerError.image_pull_failed(image, error)
-SSHNotEnabledError = lambda env_name: ConfigError.ssh_not_enabled(env_name)
-SecurityError = lambda message: ConfigError.security_violation(message)
+def DockerNotAvailableError():
+  return DockerError.daemon_unavailable()
+
+
+def EnvironmentExistsError(env_name):
+  return ConfigError.environment_exists(env_name)
+
+
+def EnvironmentNotFoundError(env_name):
+  return ConfigError.environment_not_found(env_name)
+
+
+def ContainerNotRunningError(env_name):
+  return DockerError.container_not_running(env_name)
+
+
+def ImagePullError(image, error):
+  return DockerError.image_pull_failed(image, error)
+
+
+def SSHNotEnabledError(env_name):
+  return ConfigError.ssh_not_enabled(env_name)
+
+
+def SecurityError(message):
+  return ConfigError.security_violation(message)
 
 
 # Forbidden mount paths for security

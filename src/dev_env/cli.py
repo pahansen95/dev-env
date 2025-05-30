@@ -378,7 +378,7 @@ def cmd_exec(args: argparse.Namespace) -> int:
     # Execute command and get result
     output, exit_code = docker.exec_run(
       container_id=container_id,
-      cmd=args.command,
+      cmd=args.exec_command,
     )
 
     # Print output
@@ -487,7 +487,7 @@ def main():
   # exec command
   exec_parser = subparsers.add_parser("exec", help="Execute command in environment")
   exec_parser.add_argument("name", help="Environment name")
-  exec_parser.add_argument("command", nargs="+", help="Command to execute")
+  exec_parser.add_argument("exec_command", nargs="+", help="Command to execute")
 
   # ssh command
   ssh_parser = subparsers.add_parser("ssh", help="SSH into environment")

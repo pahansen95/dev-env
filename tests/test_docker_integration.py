@@ -1,5 +1,6 @@
 # tests/test_docker_integration.py
 
+import time
 import pytest
 from dev_env.docker import DockerClient
 from dev_env.utils import check_docker_available
@@ -96,7 +97,7 @@ class TestDockerRealIntegration:
 
     try:
       # Create network
-      network = docker_client.create_network(network_name, driver="bridge", labels={"test": "true"})
+      docker_client.create_network(network_name, driver="bridge", labels={"test": "true"})
 
       # Create container on custom network
       container_id = docker_client.create_container(

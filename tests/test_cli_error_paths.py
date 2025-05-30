@@ -37,7 +37,8 @@ config = Environment(name="test", base_image="nonexistent:latest")
     result = cmd_up(args)
 
     assert result != 0  # Should fail with appropriate exit code
-    mock_state.remove_environment.assert_called_once()  # Cleanup on failure
+    # No cleanup needed since state was never saved
+    mock_state.remove_environment.assert_not_called()
 
   @patch("dev_env.cli.check_docker_available", return_value=True)
   @patch("dev_env.cli.DockerClient")
@@ -82,7 +83,7 @@ config = Environment(
     mock_docker_class.return_value = mock_docker
 
     # Make SSH setup fail
-    with patch("dev_env.cli.setup_ssh_server", side_effect=Exception("SSH install failed")):
+    with patch("dev_env.utils.setup_ssh_server", side_effect=Exception("SSH install failed")):
       config_file = tmp_path / "test.py"
       config_file.write_text("""
 from dev_env.config import Environment
@@ -137,7 +138,7 @@ class TestCmdExecErrorPaths:
     mock_docker.exec_run.return_value = (b"Command not found", 127)
     mock_docker_class.return_value = mock_docker
 
-    args = Namespace(name="test", command=["nonexistent"], state_dir=Path("/tmp"))
+    args = Namespace(name="test", exec_command=["nonexistent"], state_dir=Path("/tmp"))
     result = cmd_exec(args)
 
     assert result == 127  # Exit code propagated

@@ -73,7 +73,7 @@ class TestDockerClientCore:
     mock_env.to_docker_host_config.return_value = {"Memory": 2147483648, "CpuQuota": 200000}
 
     client = DockerClient()
-    container_id = client.create_container(name="secure-test", image="python:3.13", env_config=mock_env)
+    client.create_container(name="secure-test", image="python:3.13", env_config=mock_env)
 
     # Verify security settings applied
     call_args = mock_connection.request.call_args
@@ -116,28 +116,23 @@ class TestDockerImageOperations:
       mock_conn = Mock()
       mock_conn_class.return_value = mock_conn
 
-      # First request - image doesn't exist
-      mock_response1 = Mock()
-      mock_response1.status = 404
-      mock_conn.getresponse.side_effect = [mock_response1]
+      # Mock image exists check (should fail)
+      check_response = Mock()
+      check_response.status = 404
+      check_response.read.return_value = b'{"message": "No such image"}'
 
-      # Then setup for streaming pull
-      mock_conn.request.side_effect = [
-        RuntimeError("Docker API error"),  # From _request
-        None,  # Successful streaming request
-      ]
-
-      # Mock streaming response
-      mock_stream = Mock()
-      mock_stream.status = 200
-      mock_stream.readline.side_effect = [
+      # Mock streaming response for successful pull
+      pull_response = Mock()
+      pull_response.status = 200
+      pull_response.readline.side_effect = [
         b'{"status": "Pulling", "id": "layer1"}\n',
         b'{"status": "Downloading", "id": "layer1", "progressDetail": {"current": 1024, "total": 2048}}\n',
         b'{"status": "Downloading", "id": "layer1", "progressDetail": {"current": 2048, "total": 2048}}\n',
         b'{"status": "Pull complete", "id": "layer1"}\n',
         b"",  # End of stream
       ]
-      mock_conn.getresponse.side_effect = [mock_response1, mock_stream]
+
+      mock_conn.getresponse.side_effect = [check_response, pull_response]
 
       client = DockerClient()
       progress_calls = []

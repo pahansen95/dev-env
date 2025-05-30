@@ -168,7 +168,7 @@ class TestCmdExec:
     mock_docker.exec_run.return_value = (b"output", 0)
     mock_docker_class.return_value = mock_docker
 
-    args = Namespace(name="test", command=["ls"], state_dir=Path("/tmp"))
+    args = Namespace(name="test", exec_command=["ls"], state_dir=Path("/tmp"))
     result = cmd_exec(args)
     assert result == 0
 
