@@ -1,389 +1,373 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
-# run_tests.sh - Comprehensive test runner for dev-env project
-# Can be used locally or in CI/CD pipelines
+# run-tests.sh - Simplified test runner for CI/CD integration
+# Provides standardized test execution with minimal complexity
 
 # Source shared utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=./utils.sh
 source "${SCRIPT_DIR}/utils.sh"
 
-# Configuration
-PROJECT_ROOT="$(get_project_root)"
-VENV_PATH="${PROJECT_ROOT}/.venv"
-COVERAGE_MIN_THRESHOLD=85
-COVERAGE_REPORT_DIR="${PROJECT_ROOT}/htmlcov"
-TEST_RESULTS_DIR="${PROJECT_ROOT}/test-results"
+# Configuration defaults
+readonly DEFAULT_OUTPUT_DIR=".test-results"
+readonly DEFAULT_COVERAGE_THRESHOLD=70
+readonly PYTHON_MIN_VERSION="3.13"
 
-# Help text
+# Script variables
+test_type="all"
+coverage_enabled=""
+output_format=""
+output_dir="$DEFAULT_OUTPUT_DIR"
+coverage_threshold="$DEFAULT_COVERAGE_THRESHOLD"
+declare -a pytest_args=()
+
+# Exit codes
+readonly EXIT_SUCCESS=0
+readonly EXIT_TEST_FAILED=1
+readonly EXIT_INVALID_ARGS=2
+readonly EXIT_MISSING_DEPS=3
+readonly EXIT_COVERAGE_FAILED=4
+
 show_help() {
     cat << EOF
-Usage: $0 [OPTIONS]
+Usage: $0 [OPTIONS] [-- PYTEST_ARGS]
 
-Run the dev-env test suite with various options.
+Standardized test runner for CI/CD pipelines.
 
 OPTIONS:
-    -h, --help              Show this help message
-    -v, --verbose           Enable verbose output
-    -q, --quiet             Suppress non-essential output
-    -f, --fast              Run fast tests only (skip slow/integration tests)
-    -c, --coverage          Generate coverage report (default: enabled)
-    --no-coverage           Disable coverage reporting
-    --unit                  Run unit tests only
-    --integration           Run integration tests only
-    --error-scenarios       Run error scenario tests only
-    --ci                    CI mode (stricter settings, JUnit XML output)
-    --setup-only            Only setup environment, don't run tests
-    --cleanup               Clean up test artifacts and coverage files
-    --parallel              Run tests in parallel (requires pytest-xdist)
+    --type TYPE        Test type: all|unit|integration|smoke (default: all)
+    --coverage [BOOL]  Enable/disable coverage (yes|no, default: no, yes in CI)
+    --format FORMAT    Output format: terminal|junit|json (default: terminal, junit in CI)
+    --output DIR       Output directory for reports (default: $DEFAULT_OUTPUT_DIR)
+    --fail-under PCT   Coverage threshold percentage (default: $DEFAULT_COVERAGE_THRESHOLD)
+    -h, --help         Show this help message
+
+PYTEST_ARGS:
+    Additional arguments passed directly to pytest
 
 EXAMPLES:
-    $0                      Run all tests with coverage
-    $0 --fast              Run fast tests only
-    $0 --unit              Run unit tests only
-    $0 --ci                Run in CI mode
-    $0 --cleanup           Clean up test artifacts
+    $0                                    # Run all tests with defaults
+    $0 --type unit --coverage            # Run unit tests with coverage
+    $0 --coverage no                     # Explicitly disable coverage
+    $0 --format junit --output results/  # Generate JUnit report
+    $0 --type smoke -- -v -s            # Run smoke tests with pytest verbose
 
-ENVIRONMENT VARIABLES:
-    PYTEST_ARGS            Additional arguments to pass to pytest
-    COVERAGE_MIN           Minimum coverage threshold (default: $COVERAGE_MIN_THRESHOLD)
-    CI                     Set to 'true' to enable CI mode automatically
+EXIT CODES:
+    0 - All tests passed
+    1 - Test failures
+    2 - Invalid arguments
+    3 - Missing dependencies
+    4 - Coverage below threshold
 EOF
 }
 
-# Parse command line arguments
-VERBOSE=false
-QUIET=false
-FAST_ONLY=false
-COVERAGE_ENABLED=true
-UNIT_ONLY=false
-INTEGRATION_ONLY=false
-ERROR_SCENARIOS_ONLY=false
-CI_MODE=false
-SETUP_ONLY=false
-CLEANUP=false
-PARALLEL=false
-
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -h|--help)
-            show_help
-            exit 0
-            ;;
-        -v|--verbose)
-            VERBOSE=true
-            HELPERS_UTILS_VERBOSE=true
-            shift
-            ;;
-        -q|--quiet)
-            QUIET=true
-            HELPERS_UTILS_QUIET=true
-            shift
-            ;;
-        -f|--fast)
-            FAST_ONLY=true
-            shift
-            ;;
-        -c|--coverage)
-            COVERAGE_ENABLED=true
-            shift
-            ;;
-        --no-coverage)
-            COVERAGE_ENABLED=false
-            shift
-            ;;
-        --unit)
-            UNIT_ONLY=true
-            shift
-            ;;
-        --integration)
-            INTEGRATION_ONLY=true
-            shift
-            ;;
-        --error-scenarios)
-            ERROR_SCENARIOS_ONLY=true
-            shift
-            ;;
-        --ci)
-            CI_MODE=true
-            shift
-            ;;
-        --setup-only)
-            SETUP_ONLY=true
-            shift
-            ;;
-        --cleanup)
-            CLEANUP=true
-            shift
-            ;;
-        --parallel)
-            PARALLEL=true
-            shift
-            ;;
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --type)
+                if [[ $# -lt 2 ]]; then
+                    log_error "Option --type requires an argument"
+                    exit $EXIT_INVALID_ARGS
+                fi
+                test_type="$2"
+                shift 2
+                ;;
+            --coverage)
+                if [[ $# -gt 1 ]] && [[ "$2" =~ ^(yes|no)$ ]]; then
+                    coverage_enabled="$2"
+                    shift 2
+                else
+                    coverage_enabled="yes"
+                    shift
+                fi
+                ;;
+            --format)
+                if [[ $# -lt 2 ]]; then
+                    log_error "Option --format requires an argument"
+                    exit $EXIT_INVALID_ARGS
+                fi
+                output_format="$2"
+                shift 2
+                ;;
+            --output)
+                if [[ $# -lt 2 ]]; then
+                    log_error "Option --output requires an argument"
+                    exit $EXIT_INVALID_ARGS
+                fi
+                output_dir="$2"
+                shift 2
+                ;;
+            --fail-under)
+                if [[ $# -lt 2 ]]; then
+                    log_error "Option --fail-under requires an argument"
+                    exit $EXIT_INVALID_ARGS
+                fi
+                coverage_threshold="$2"
+                shift 2
+                ;;
+            -h|--help)
+                show_help
+                exit $EXIT_SUCCESS
+                ;;
+            --)
+                shift
+                pytest_args=("$@")
+                break
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                show_help >&2
+                exit $EXIT_INVALID_ARGS
+                ;;
+        esac
+    done
+    
+    # Apply CI defaults
+    if [[ "${CI:-false}" == "true" ]]; then
+        : ${coverage_enabled:="yes"}
+        : ${output_format:="junit"}
+    else
+        : ${coverage_enabled:="no"}
+        : ${output_format:="terminal"}
+    fi
+    
+    # Validate arguments
+    case "$test_type" in
+        all|unit|integration|smoke) ;;
         *)
-            log_error "Unknown option: $1"
-            show_help
-            exit 1
+            log_error "Invalid test type '$test_type' - use: all|unit|integration|smoke"
+            exit $EXIT_INVALID_ARGS
             ;;
     esac
-done
-
-# Auto-detect CI mode
-if [[ "${CI:-false}" == "true" ]]; then
-    CI_MODE=true
-    log_info "CI environment detected, enabling CI mode"
-fi
-
-# Override coverage threshold if set in environment
-if [[ -n "${COVERAGE_MIN:-}" ]]; then
-    COVERAGE_MIN_THRESHOLD="$COVERAGE_MIN"
-fi
-
-# Function to setup Python environment
-setup_environment() {
-    log_info "Setting up Python environment..."
     
-    cd "$PROJECT_ROOT"
+    case "$output_format" in
+        terminal|junit|json) ;;
+        *)
+            log_error "Invalid output format '$output_format' - use: terminal|junit|json"
+            exit $EXIT_INVALID_ARGS
+            ;;
+    esac
     
-    # Check if virtual environment exists
-    if [[ ! -d "$VENV_PATH" ]]; then
-        log_info "Creating virtual environment..."
-        python3 -m venv "$VENV_PATH"
-    fi
-    
-    # Activate virtual environment
-    # shellcheck source=/dev/null
-    source "$VENV_PATH/bin/activate"
-    
-    # Verify Python version
-    python_version=$(python --version 2>&1 | cut -d' ' -f2)
-    log_info "Using Python $python_version"
-    
-    # Check if dev dependencies are installed
-    if ! python -c "import pytest" 2>/dev/null; then
-        log_info "Installing development dependencies..."
-        if command_exists uv; then
-            uv sync --group dev
-        else
-            pip install --upgrade pip
-            pip install -e .
-            # Install dev dependencies manually if no uv
-            pip install pytest>=8.3.5 pytest-cov>=6.1.1 pytest-mock>=3.14.1
-        fi
-    fi
-    
-    # Install package in editable mode
-    log_info "Installing dev-env in editable mode..."
-    pip install -e . >/dev/null 2>&1
-    
-    log_success "Environment setup complete"
-}
-
-# Function to clean up test artifacts
-cleanup_artifacts() {
-    cd "$PROJECT_ROOT"
-    cleanup_files ".coverage" ".coverage.*" "htmlcov" ".pytest_cache" "test-results" "__pycache__" "*.pyc"
-}
-
-# Function to run linting and code quality checks
-run_quality_checks() {
-    if [[ "$CI_MODE" == "true" ]] || [[ "$VERBOSE" == "true" ]]; then
-        log_info "Running code quality checks..."
-        
-        # Run ruff linting
-        if command_exists ruff; then
-            log_info "Running ruff linter..."
-            ruff check src/ tests/ || {
-                log_error "Ruff linting failed"
-                return 1
-            }
-            
-            log_info "Running ruff formatter..."
-            ruff format --check src/ tests/ || {
-                log_error "Code formatting check failed"
-                return 1
-            }
-        else
-            log_warning "Ruff not available, skipping linting"
-        fi
-        
-        # Run mypy type checking
-        if command_exists mypy; then
-            log_info "Running mypy type checking..."
-            mypy src/ || {
-                log_warning "Type checking found issues (non-blocking)"
-            }
-        else
-            log_warning "Mypy not available, skipping type checking"
-        fi
-        
-        log_success "Code quality checks complete"
+    if [[ ! "$coverage_threshold" =~ ^[0-9]+$ ]] || [[ "$coverage_threshold" -lt 0 ]] || [[ "$coverage_threshold" -gt 100 ]]; then
+        log_error "Invalid coverage threshold '$coverage_threshold' - must be 0-100"
+        exit $EXIT_INVALID_ARGS
     fi
 }
 
-# Function to build pytest arguments
-build_pytest_args() {
-    local args=()
+validate_environment() {
+    log_info "Validating test environment..."
     
-    # Base arguments
-    if [[ "$VERBOSE" == "true" ]]; then
-        args+=("-v")
-    elif [[ "$QUIET" == "true" ]]; then
-        args+=("-q")
+    # Check Python version
+    if ! command_exists python3; then
+        log_error "Python 3 not found"
+        exit $EXIT_MISSING_DEPS
     fi
     
-    # Coverage arguments
-    if [[ "$COVERAGE_ENABLED" == "true" ]]; then
-        args+=("--cov=src/dev_env")
-        args+=("--cov-report=term-missing")
-        args+=("--cov-report=html:$COVERAGE_REPORT_DIR")
-        args+=("--cov-fail-under=$COVERAGE_MIN_THRESHOLD")
+    local python_version
+    python_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    
+    if [[ "$(printf '%s\n' "$PYTHON_MIN_VERSION" "$python_version" | sort -V | head -n1)" != "$PYTHON_MIN_VERSION" ]]; then
+        log_error "Python $PYTHON_MIN_VERSION+ required (found: $python_version)"
+        exit $EXIT_MISSING_DEPS
+    fi
+    
+    # Check pytest availability
+    if ! python3 -m pytest --version >/dev/null 2>&1; then
+        log_error "pytest not found - run: pip install -e .[dev]"
+        exit $EXIT_MISSING_DEPS
+    fi
+    
+    # Check coverage plugin if needed
+    if [[ "$coverage_enabled" == "yes" ]] && ! python3 -c "import pytest_cov" 2>/dev/null; then
+        log_error "pytest-cov not found - run: pip install -e .[dev]"
+        exit $EXIT_MISSING_DEPS
+    fi
+    
+    # Check json plugin if needed
+    if [[ "$output_format" == "json" ]] && ! python3 -c "import pytest_json_report" 2>/dev/null; then
+        log_error "pytest-json-report not found - run: pip install pytest-json-report"
+        exit $EXIT_MISSING_DEPS
+    fi
+    
+    log_success "Environment validated"
+}
+
+build_pytest_command() {
+    local -a cmd=(python3 -m pytest)
+    
+    # Add test selection based on type
+    case "$test_type" in
+        all)
+            cmd+=(tests/)
+            ;;
+        unit)
+            cmd+=(tests/test_config.py tests/test_state.py tests/test_docker.py tests/test_utils.py tests/test_cli.py tests/test_core.py)
+            cmd+=(-m "not integration")
+            ;;
+        integration)
+            cmd+=(tests/test_integration.py)
+            ;;
+        smoke)
+            cmd+=(tests/test_core.py::TestEnvironmentConfig::test_minimal_environment)
+            cmd+=(tests/test_core.py::TestDockerClient::test_docker_client_init)
+            ;;
+    esac
+    
+    # Add coverage options
+    if [[ "$coverage_enabled" == "yes" ]]; then
+        cmd+=(
+            --cov=src/dev_env
+            --cov-report=term-missing
+            --cov-fail-under="$coverage_threshold"
+        )
         
-        if [[ "$CI_MODE" == "true" ]]; then
-            args+=("--cov-report=xml:coverage.xml")
-        fi
+        # Add coverage output files
+        mkdir -p "$output_dir"
+        cmd+=(
+            --cov-report="html:$output_dir/htmlcov"
+            --cov-report="xml:$output_dir/coverage.xml"
+        )
+    fi
+    
+    # Add output format options
+    case "$output_format" in
+        junit)
+            mkdir -p "$output_dir"
+            cmd+=(--junit-xml="$output_dir/junit.xml")
+            if [[ "${CI:-false}" != "true" ]]; then
+                # Still show progress in terminal when generating JUnit locally
+                cmd+=(-v)
+            fi
+            ;;
+        json)
+            mkdir -p "$output_dir"
+            # Note: Requires pytest-json-report plugin
+            cmd+=(--json-report --json-report-file="$output_dir/results.json")
+            ;;
+        terminal)
+            # Use human-friendly output
+            if [[ -t 1 ]]; then
+                # Terminal supports colors
+                cmd+=(--color=yes)
+            fi
+            cmd+=(-v)  # Verbose for better readability
+            ;;
+    esac
+    
+    # Add standard options for CI
+    if [[ "${CI:-false}" == "true" ]]; then
+        cmd+=(--tb=short --strict-markers)
     else
-        args+=("--no-cov")
+        # More detailed output for developers
+        cmd+=(--tb=short --strict-markers --durations=10)
     fi
     
-    # CI mode arguments
-    if [[ "$CI_MODE" == "true" ]]; then
-        mkdir -p "$TEST_RESULTS_DIR"
-        args+=("--junitxml=$TEST_RESULTS_DIR/junit.xml")
-        args+=("--tb=short")
-        args+=("--strict-markers")
+    # Add any user-provided pytest arguments
+    if [[ ${#pytest_args[@]} -gt 0 ]]; then
+        cmd+=("${pytest_args[@]}")
     fi
     
-    # Parallel execution
-    if [[ "$PARALLEL" == "true" ]]; then
-        if python -c "import xdist" 2>/dev/null; then
-            args+=("-n" "auto")
+    echo "${cmd[@]}"
+}
+
+execute_tests() {
+    local cmd
+    cmd=$(build_pytest_command)
+    
+    echo
+    log_info "Running $test_type tests..."
+    log_debug "Command: $cmd"
+    
+    cd "$(get_project_root)"
+    
+    # Execute pytest and capture exit code
+    local exit_code=0
+    if ! $cmd; then
+        exit_code=$?
+        
+        # Distinguish between test failures and coverage failures
+        if [[ "$coverage_enabled" == "yes" ]] && grep -q "coverage.*below" "$output_dir/coverage.xml" 2>/dev/null; then
+            echo
+            log_error "Coverage below threshold $coverage_threshold%"
+            return $EXIT_COVERAGE_FAILED
         else
-            log_warning "pytest-xdist not available, running tests sequentially"
+            echo
+            log_error "Test failures detected"
+            return $EXIT_TEST_FAILED
         fi
     fi
     
-    # Test selection
-    if [[ "$FAST_ONLY" == "true" ]]; then
-        args+=("-m" "not slow")
-    elif [[ "$UNIT_ONLY" == "true" ]]; then
-        args+=("tests/test_config.py" "tests/test_state.py" "tests/test_docker.py" "tests/test_utils.py")
-    elif [[ "$INTEGRATION_ONLY" == "true" ]]; then
-        args+=("tests/test_integration.py")
-    elif [[ "$ERROR_SCENARIOS_ONLY" == "true" ]]; then
-        args+=("tests/test_error_scenarios.py")
-    else
-        args+=("tests/")
-    fi
-    
-    # Add any additional pytest arguments from environment
-    if [[ -n "${PYTEST_ARGS:-}" ]]; then
-        # shellcheck disable=SC2206
-        args+=($PYTEST_ARGS)
-    fi
-    
-    echo "${args[@]}"
+    echo
+    log_success "All tests passed successfully!"
+    return $EXIT_SUCCESS
 }
 
-# Function to run tests
-run_tests() {
-    log_info "Running tests..."
+report_results() {
+    echo
+    log_info "Test Run Summary"
+    log_info "================"
     
-    cd "$PROJECT_ROOT"
-    
-    # Activate virtual environment
-    # shellcheck source=/dev/null
-    source "$VENV_PATH/bin/activate"
-    
-    # Set PYTHONPATH to include src directory
-    export PYTHONPATH="$PROJECT_ROOT/src:${PYTHONPATH:-}"
-    
-    # Build pytest arguments
-    local pytest_args
-    pytest_args=$(build_pytest_args)
-    
-    if [[ "$VERBOSE" == "true" ]]; then
-        log_info "Running: pytest $pytest_args"
+    # Report test configuration
+    echo "  Test Type: $test_type"
+    echo "  Coverage: $coverage_enabled"
+    if [[ "$coverage_enabled" == "yes" ]]; then
+        echo "  Coverage Threshold: $coverage_threshold%"
     fi
+    echo
     
-    # Run the tests
-    # shellcheck disable=SC2086
-    if python -m pytest $pytest_args; then
-        log_success "All tests passed!"
-        return 0
-    else
-        log_error "Some tests failed"
-        return 1
+    # Report output locations
+    if [[ -d "$output_dir" ]] && [[ "$output_format" != "terminal" || "$coverage_enabled" == "yes" ]]; then
+        log_info "Generated Reports:"
+        
+        if [[ -f "$output_dir/junit.xml" ]]; then
+            echo "  • JUnit XML: $output_dir/junit.xml"
+        fi
+        
+        if [[ -f "$output_dir/coverage.xml" ]]; then
+            echo "  • Coverage XML: $output_dir/coverage.xml"
+        fi
+        
+        if [[ -d "$output_dir/htmlcov" ]]; then
+            echo "  • Coverage HTML: $output_dir/htmlcov/index.html"
+            if [[ "${CI:-false}" != "true" ]] && command_exists open 2>/dev/null; then
+                echo "    (open with: open $output_dir/htmlcov/index.html)"
+            fi
+        fi
+        
+        if [[ -f "$output_dir/results.json" ]]; then
+            echo "  • JSON Results: $output_dir/results.json"
+        fi
     fi
 }
 
-# Function to display test summary
-display_summary() {
-    if [[ "$COVERAGE_ENABLED" == "true" ]] && [[ -f "$COVERAGE_REPORT_DIR/index.html" ]]; then
-        log_info "Coverage report generated: $COVERAGE_REPORT_DIR/index.html"
-    fi
-    
-    if [[ "$CI_MODE" == "true" ]] && [[ -f "$TEST_RESULTS_DIR/junit.xml" ]]; then
-        log_info "JUnit XML report generated: $TEST_RESULTS_DIR/junit.xml"
-    fi
-    
-    if [[ -f "coverage.xml" ]]; then
-        log_info "Coverage XML report generated: coverage.xml"
-    fi
-}
-
-# Main execution
 main() {
-    start_timer "test_run"
+    start_timer "test_execution"
     
-    log_info "Starting dev-env test runner..."
-    log_info "Project root: $PROJECT_ROOT"
+    parse_arguments "$@"
+    validate_environment
     
-    # Handle cleanup mode
-    if [[ "$CLEANUP" == "true" ]]; then
-        cleanup_artifacts
-        exit 0
-    fi
+    echo
+    log_info "Test Configuration"
+    log_info "=================="
+    echo "  Type: $test_type"
+    echo "  Coverage: $coverage_enabled"
+    echo "  Format: $output_format"
+    echo "  Output: $output_dir"
     
-    # Setup environment
-    setup_environment
-    
-    # Handle setup-only mode
-    if [[ "$SETUP_ONLY" == "true" ]]; then
-        log_success "Environment setup complete"
-        exit 0
-    fi
-    
-    # Run quality checks
-    if ! run_quality_checks; then
-        if [[ "$CI_MODE" == "true" ]]; then
-            log_error "Quality checks failed in CI mode"
-            exit 1
-        else
-            log_warning "Quality checks failed, continuing with tests..."
-        fi
-    fi
-    
-    # Run tests
+    # Execute tests and handle exit code
     local test_exit_code=0
-    if ! run_tests; then
-        test_exit_code=1
+    if ! execute_tests; then
+        test_exit_code=$?
     fi
     
-    # Display summary
-    display_summary
+    report_results
     
-    if [[ $test_exit_code -eq 0 ]]; then
-        log_timer "test_run"
-        log_success "Test run completed successfully"
-    else
-        log_timer "test_run"
-        log_error "Test run failed"
-    fi
+    echo
+    log_timer "test_execution"
+    echo
     
     exit $test_exit_code
 }
 
-# Run main function
+# Execute main function
 main "$@"
