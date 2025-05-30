@@ -1,41 +1,71 @@
-"""Secure Python development environment with security hardening"""
+#!/usr/bin/env python3
+"""
+Security-Hardened Python Development Environment
 
-from dev_env.config import Environment, VolumeMount, SSHConfig, SecurityConfig, ResourceConfig
+This example demonstrates security best practices:
+- Non-root user execution
+- Read-only root filesystem
+- Minimal attack surface
+- Resource limits
+- No privileged operations
+- Isolated networking
 
-# Secure Python environment with hardened configuration
+Usage:
+  dev-env run examples/python-secure.py
+"""
+
+from pathlib import Path
+from dev_env.config import Environment, VolumeMount
+
+# Get current directory
+current_dir = Path.cwd()
+
+# Security-focused Python environment
 environment = Environment(
   name="python-secure",
-  base_image="python:3.13-slim",
+  base_image="python:3.12-slim",
+  # Run as non-root user
+  user="1000:1000",
+  # Read-only root filesystem
+  read_only=True,
+  # Drop all capabilities
+  drop_capabilities=["ALL"],
+  # No privileged mode
+  privileged=False,
+  volumes=[
+    # Mount workspace as read-write (specific exception)
+    VolumeMount(source=str(current_dir), target="/workspace", mode="rw"),
+    # Temporary directories for Python
+    VolumeMount(source="python-tmp", target="/tmp", mode="rw"),
+    # Home directory for user files
+    VolumeMount(source="python-home", target="/home/developer", mode="rw"),
+  ],
+  working_dir="/workspace",
   command=["/bin/bash"],
-  # Environment variables
+  # Security-conscious environment variables
   environment={
     "PYTHONUNBUFFERED": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
     "PIP_NO_CACHE_DIR": "1",
+    "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+    "HOME": "/home/developer",
+    "USER": "developer",
   },
-  # Volume mounts - only safe directories
-  volumes=[
-    VolumeMount(source="./src", target="/workspace", mode="rw"),
-    VolumeMount(source="python-secure-cache", target="/home/dev/.cache", type="named"),
+  # Resource limits
+  memory_limit="2g",
+  cpu_limit="2.0",
+  # Minimal init commands (run as root before dropping privileges)
+  init_commands=[
+    # Create non-root user
+    "useradd -m -u 1000 -s /bin/bash developer",
+    # Install minimal requirements
+    "apt-get update && apt-get install -y --no-install-recommends git",
+    # Set up Python environment for user
+    "mkdir -p /home/developer/.local/bin",
+    "chown -R developer:developer /home/developer",
+    # Install pip packages as user
+    "su - developer -c 'pip install --user --no-cache-dir ipython pytest black flake8 mypy'",
+    # Clean up apt cache to reduce image size
+    "apt-get clean && rm -rf /var/lib/apt/lists/*",
   ],
-  # Port mappings - localhost only binding
-  ports={
-    22: {"HostPort": 2223, "HostIp": "127.0.0.1"},  # SSH access (localhost only)
-    8000: {"HostPort": 8001, "HostIp": "127.0.0.1"},  # Development server (localhost only)
-  },
-  # SSH configuration
-  ssh=SSHConfig(port=22, password_auth=False),
-  # Security configuration - run as non-root user
-  security=SecurityConfig(
-    user="1000:1000",  # Non-root user
-    drop_capabilities=["ALL"],  # Drop all capabilities
-    add_capabilities=["CHOWN"],  # Only add necessary capabilities
-    no_new_privileges=True,  # Prevent privilege escalation
-    read_only_root_fs=False,  # Allow writes to non-root filesystem
-  ),
-  # Resource constraints
-  resources=ResourceConfig(
-    memory="1g",  # Limit memory usage
-    cpus=1.0,  # Limit CPU usage
-    pids_limit=500,  # Limit number of processes
-  ),
 )

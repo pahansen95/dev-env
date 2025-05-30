@@ -120,10 +120,9 @@ environment = Environment(
 
 ## Documentation
 
-- [User Guide](docs/user-guide.md) - Complete usage documentation
-- [Quick Start](docs/quickstart.md) - Get up and running fast
-- [Workflows](docs/workflows/) - Common development scenarios
-- [Architecture](docs/architecture.md) - System design and internals
+- [User Guide](docs/user-guide.md) - Complete usage documentation with quick start, workflows, and configuration
+- [Design](docs/design.md) - Architecture, vision, and implementation details
+- [Examples](examples/) - Ready-to-use environment configurations for Python, Node.js, and more
 
 ## Why dev-env?
 
