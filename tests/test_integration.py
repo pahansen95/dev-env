@@ -80,14 +80,14 @@ config = Environment(name="test-env", base_image="python:3.13")
 
     # Create test config with volumes and network
     config_file = tmp_path / "test.py"
-    config_file.write_text(f"""
+    config_file.write_text("""
 from dev_env.config import Environment, VolumeMount, NetworkConfig
 config = Environment(
     name="test-env",
     base_image="python:3.13",
     volumes=[
         VolumeMount(source="data-vol", target="/data"),
-        VolumeMount(source="{tmp_path}", target="/host")
+        VolumeMount(source="./test-data", target="/host")
     ],
     network=NetworkConfig(name="test-network")
 )
@@ -99,7 +99,13 @@ config = Environment(
     assert result == 0
 
     # Verify volume and network creation
-    mock_docker.create_volume.assert_called_once_with("data-vol", labels={"dev-env": "test-env"})
+    assert mock_docker.create_volume.call_count == 2
+    expected_calls = [
+      ("data-vol", {"labels": {"dev-env": "test-env"}}),
+      ("./test-data", {"labels": {"dev-env": "test-env"}}),
+    ]
+    actual_calls = [(call.args[0], call.kwargs) for call in mock_docker.create_volume.call_args_list]
+    assert actual_calls == expected_calls
     mock_docker.create_network.assert_called_once()
 
   @patch("dev_env.cli.check_docker_available", return_value=True)

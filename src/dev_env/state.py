@@ -27,6 +27,7 @@ class StateManager:
                     container_name TEXT NOT NULL,
                     config TEXT NOT NULL,
                     volumes TEXT,
+                    network TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -37,6 +38,13 @@ class StateManager:
                     value TEXT NOT NULL
                 )
             """)
+
+      # Add network column if it doesn't exist (migration)
+      try:
+        conn.execute("ALTER TABLE environments ADD COLUMN network TEXT")
+      except sqlite3.OperationalError:
+        # Column already exists
+        pass
 
   @contextlib.contextmanager
   def _get_conn(self):
@@ -60,8 +68,8 @@ class StateManager:
       conn.execute(
         """
                 INSERT OR REPLACE INTO environments
-                (name, container_id, container_name, config, volumes, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?,
+                (name, container_id, container_name, config, volumes, network, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?,
                     COALESCE((SELECT created_at FROM environments WHERE name = ?), ?),
                     ?)
             """,
@@ -71,6 +79,7 @@ class StateManager:
           state["container_name"],
           json.dumps(state.get("config", {})),
           json.dumps(state.get("volumes", [])),
+          state.get("network"),
           name,  # For the COALESCE subquery
           now,  # For new records
           now,  # updated_at
@@ -91,6 +100,7 @@ class StateManager:
         "container_name": row["container_name"],
         "config": json.loads(row["config"]),
         "volumes": json.loads(row["volumes"]) if row["volumes"] else [],
+        "network": row["network"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
       }
@@ -106,6 +116,7 @@ class StateManager:
           "container_name": row["container_name"],
           "config": json.loads(row["config"]),
           "volumes": json.loads(row["volumes"]) if row["volumes"] else [],
+          "network": row["network"],
           "created_at": row["created_at"],
           "updated_at": row["updated_at"],
         }

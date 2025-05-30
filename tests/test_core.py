@@ -32,9 +32,9 @@ class TestEnvironmentConfig:
     assert env.name == "test"
     assert env.base_image == "python:3.13"
     assert env.command is None
-    assert env.ports == {}
-    assert env.environment == {}
-    assert env.volumes == []
+    assert env.ports is None
+    assert env.environment is None
+    assert env.volumes is None
     # Test flattened security config
     assert env.user == "1000:1000"
     assert env.drop_capabilities == ["ALL"]
@@ -47,7 +47,7 @@ class TestEnvironmentConfig:
       base_image="python:3.13",
       command=["sleep", "infinity"],
       environment={"TEST_VAR": "test_value"},
-      ports={22: 2222, 8000: 8000},
+      ports={22: {"HostPort": 2222}, 8000: {"HostPort": 8000}},
       volumes=[VolumeMount(source="test-vol", target="/data"), VolumeMount(source="/tmp", target="/tmp")],
       network=NetworkConfig(name="test-network"),
       git=GitConfig(url="https://github.com/test/repo.git"),
@@ -151,6 +151,7 @@ class TestStateManager:
 
     env_data = {
       "container_id": "test123",
+      "container_name": "devenv-test-12345678",
       "config": {"name": "test", "base_image": "python:3.13"},
     }
 
@@ -171,8 +172,8 @@ class TestStateManager:
     assert envs == {}
 
     # Add environment
-    state.save_environment("test1", {"container_id": "123"})
-    state.save_environment("test2", {"container_id": "456"})
+    state.save_environment("test1", {"container_id": "123", "container_name": "devenv-test1-12345678"})
+    state.save_environment("test2", {"container_id": "456", "container_name": "devenv-test2-87654321"})
 
     envs = state.list_environments()
     assert len(envs) == 2
@@ -207,8 +208,10 @@ class TestUtilities:
   """Test utility functions"""
 
   @patch("socket.socket")
-  def test_check_docker_available_success(self, mock_socket):
+  @patch("pathlib.Path.exists")
+  def test_check_docker_available_success(self, mock_exists, mock_socket):
     """Test Docker availability check success"""
+    mock_exists.return_value = True
     mock_sock = Mock()
     mock_socket.return_value = mock_sock
     mock_sock.connect.return_value = None
@@ -229,20 +232,24 @@ class TestUtilities:
   def test_generate_container_name(self):
     """Test container name generation"""
     result = generate_container_name("my-env")
-    assert result == "dev-env-my-env"
+    assert result.startswith("devenv-my-env-")
+    assert len(result) == len("devenv-my-env-") + 8  # 8 character hash suffix
+    # Verify hash contains only hex characters
+    hash_suffix = result.split("-")[-1]
+    assert all(c in "0123456789abcdef" for c in hash_suffix)
 
   def test_validate_port_mappings_valid(self):
     """Test validation of valid port mappings"""
-    ports = {22: 2222, 80: 8080}
+    ports = {22: {"HostPort": 2222}, 80: {"HostPort": 8080}}
     warnings = validate_port_mappings(ports)
     assert warnings == []
 
   def test_validate_port_mappings_privileged_ports(self):
     """Test validation warns about privileged ports"""
-    ports = {22: 22, 80: 80}
+    ports = {80: {"HostPort": 80}, 443: {"HostPort": 443}}
     warnings = validate_port_mappings(ports)
     assert len(warnings) == 2
-    assert all("privileged port" in warning.lower() for warning in warnings)
+    assert all("privileged" in warning.lower() for warning in warnings)
 
   def test_validate_bind_mounts_existing_paths(self, tmp_path):
     """Test validation of existing bind mount paths"""
@@ -256,7 +263,7 @@ class TestUtilities:
 
   def test_format_size(self):
     """Test size formatting utility"""
-    assert format_size(0) == "0 B"
+    assert format_size(0) == "0.0 B"
     assert format_size(1024) == "1.0 KB"
     assert format_size(1024 * 1024) == "1.0 MB"
     assert format_size(1024 * 1024 * 1024) == "1.0 GB"

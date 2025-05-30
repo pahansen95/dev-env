@@ -51,7 +51,7 @@ def sample_environment():
     name="test-env",
     base_image="python:3.13",
     command=["sleep", "infinity"],
-    ports={22: 2222, 8000: 8000},
+    ports={22: {"HostPort": 2222}, 8000: {"HostPort": 8000}},
     environment={"TEST_VAR": "test_value"},
     volumes=[VolumeMount(source="test-vol", target="/data"), VolumeMount(source="/tmp", target="/tmp")],
     network=NetworkConfig(name="test-network", driver="bridge"),
@@ -136,6 +136,27 @@ def mock_subprocess():
     mock_run.return_value.stdout = ""
     mock_run.return_value.stderr = ""
     yield {"call": mock_call, "run": mock_run}
+
+
+@pytest.fixture
+def mock_docker_streaming():
+  """Mock Docker streaming responses for pull/build operations"""
+
+  def mock_stream(image_name=None, **kwargs):
+    """Mock streaming response with progress updates"""
+    return [
+      {"status": "Pulling from library/python", "id": "3.13"},
+      {"status": "Downloading", "progressDetail": {"current": 1024, "total": 10240}, "id": "layer1"},
+      {"status": "Download complete", "id": "layer1"},
+      {"status": "Extracting", "progressDetail": {"current": 5120, "total": 10240}, "id": "layer1"},
+      {"status": "Pull complete", "id": "layer1"},
+      {"status": "Digest: sha256:abcd1234...", "id": "3.13"},
+      {"status": "Status: Downloaded newer image for python:3.13"},
+    ]
+
+  with patch("dev_env.docker.DockerClient.pull_image") as mock_pull:
+    mock_pull.side_effect = mock_stream
+    yield mock_pull
 
 
 @pytest.fixture(autouse=True)
