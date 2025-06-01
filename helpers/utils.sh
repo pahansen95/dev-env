@@ -204,10 +204,95 @@ log_timer() {
 }
 
 # Export functions for use in other scripts
+# Version extraction utilities
+# Extract version from Python __init__.py file
+get_python_version() {
+    local file="$1"
+    
+    if [[ ! -f "$file" ]]; then
+        log_error "Python file not found: $file"
+        return 1
+    fi
+    
+    # Extract __version__ = "x.y.z" or __version__ = 'x.y.z'
+    local version=$(grep -E "^__version__\s*=\s*['\"]" "$file" | sed -E 's/^__version__[[:space:]]*=[[:space:]]*["'\'']([^"'\'']+)["'\''].*/\1/')
+    
+    if [[ -z "$version" ]]; then
+        log_error "No version found in $file"
+        return 1
+    fi
+    
+    echo "$version"
+}
+
+# Extract version from pyproject.toml
+get_pyproject_version() {
+    local file="${1:-pyproject.toml}"
+    
+    if [[ ! -f "$file" ]]; then
+        log_error "pyproject.toml not found: $file"
+        return 1
+    fi
+    
+    # Extract version = "x.y.z" from [project] section
+    local version=$(grep -A 20 '^\[project\]' "$file" | grep '^version[[:space:]]*=' | head -1 | sed -E 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
+    
+    if [[ -z "$version" ]]; then
+        log_error "No version found in $file"
+        return 1
+    fi
+    
+    echo "$version"
+}
+
+# Check if current commit has a tag
+get_current_tag() {
+    # Get the tag pointing to current commit
+    local tag=$(git describe --exact-match --tags HEAD 2>/dev/null || true)
+    echo "$tag"
+}
+
+# Validate semver format
+is_valid_semver() {
+    local version="$1"
+    
+    # Check format: vX.Y.Z where X, Y, Z are numbers
+    if [[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Calculate SHA256 checksum using Python
+calculate_checksum() {
+    local file="$1"
+    
+    if [[ ! -f "$file" ]]; then
+        log_error "File not found for checksum: $file"
+        return 1
+    fi
+    
+    # Use Python to calculate SHA256
+    python3 -c "
+import hashlib
+import sys
+with open('$file', 'rb') as f:
+    hash_obj = hashlib.sha256()
+    while chunk := f.read(8192):
+        hash_obj.update(chunk)
+    print(hash_obj.hexdigest())
+" || {
+        log_error "Failed to calculate checksum for $file"
+        return 1
+    }
+}
+
 export -f log_info log_success log_warning log_error log_debug log_progress
 export -f command_exists get_script_dir get_project_root require_command require_directory
 export -f setup_python_venv cleanup_files set_exit_handler
 export -f start_timer end_timer log_timer
+export -f get_python_version get_pyproject_version get_current_tag is_valid_semver calculate_checksum
 
 # Set default verbosity based on imported values
 if [[ "${VERBOSE:-false}" == "true" ]]; then
