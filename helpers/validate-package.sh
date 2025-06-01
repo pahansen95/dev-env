@@ -63,6 +63,7 @@ main() {
     log_progress "Checking prerequisites"
     require_command python3 "Install Python 3.13+" || exit $EXIT_VERSION_MISMATCH
     require_command git "Install Git" || exit $EXIT_VERSION_MISMATCH
+    require_command uv "Install uv (https://docs.astral.sh/uv/)" || exit $EXIT_VERSION_MISMATCH
     
     # 1. Check version consistency
     log_progress "Checking version consistency"
@@ -106,21 +107,8 @@ main() {
     
     # 4. Test installation in fresh venv
     log_progress "Testing package installation"
-    python3 -m venv "$TEST_VENV" || {
+    uv venv "$TEST_VENV" --python python3 || {
         log_error "Failed to create test environment"
-        exit $EXIT_INSTALL_FAILED
-    }
-    
-    # Activate test environment
-    # shellcheck source=/dev/null
-    source "${TEST_VENV}/bin/activate" || {
-        log_error "Failed to activate test environment"
-        exit $EXIT_INSTALL_FAILED
-    }
-    
-    # Upgrade pip
-    pip install --quiet --upgrade pip || {
-        log_error "Failed to upgrade pip"
         exit $EXIT_INSTALL_FAILED
     }
     
@@ -133,8 +121,8 @@ main() {
         exit $EXIT_INSTALL_FAILED
     fi
     
-    # Install the wheel
-    pip install "$wheel_file" || {
+    # Install the wheel using uv
+    uv pip install --python "$TEST_VENV/bin/python" "$wheel_file" || {
         log_error "Failed to install package"
         exit $EXIT_INSTALL_FAILED
     }
@@ -143,7 +131,7 @@ main() {
     
     # 5. Test import
     log_progress "Testing Python import"
-    python -c "import dev_env" || {
+    "$TEST_VENV/bin/python" -c "import dev_env" || {
         log_error "Failed to import dev_env module"
         exit $EXIT_IMPORT_FAILED
     }
@@ -152,7 +140,7 @@ main() {
     
     # 6. Test CLI command
     log_progress "Testing CLI command"
-    dev-env --version || {
+    "$TEST_VENV/bin/dev-env" --version || {
         log_error "CLI command 'dev-env --version' failed"
         exit $EXIT_CLI_FAILED
     }
@@ -189,9 +177,6 @@ main() {
         
         log_success "Tag validation passed: $current_tag"
     fi
-    
-    # Deactivate test environment
-    deactivate
     
     # Cleanup
     cleanup

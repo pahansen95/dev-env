@@ -18,18 +18,9 @@ readonly EXIT_BUILD_ENV_FAILED=2
 readonly EXIT_BUILD_FAILED=3
 
 # Configuration
-readonly BUILD_VENV=".build-venv"
 readonly DIST_DIR="dist"
 readonly BUILD_DIR="build"
 readonly CHECKSUMS_FILE="${DIST_DIR}/checksums.txt"
-
-# Cleanup function
-cleanup() {
-    if [[ -d "$BUILD_VENV" ]]; then
-        log_info "Cleaning up build environment"
-        rm -rf "$BUILD_VENV"
-    fi
-}
 
 # Main build function
 main() {
@@ -43,6 +34,7 @@ main() {
     log_progress "Checking prerequisites"
     require_command python3 "Install Python 3.13+" || exit $EXIT_NO_PYTHON_GIT
     require_command git "Install Git" || exit $EXIT_NO_PYTHON_GIT
+    require_command uv "Install uv (https://docs.astral.sh/uv/)" || exit $EXIT_NO_PYTHON_GIT
     
     # Clean previous build artifacts
     log_progress "Cleaning previous build artifacts"
@@ -55,35 +47,9 @@ main() {
     # Remove any .egg-info directories
     find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
     
-    # Create isolated build environment
-    log_progress "Creating isolated build environment"
-    python3 -m venv "$BUILD_VENV" || {
-        log_error "Failed to create build environment"
-        exit $EXIT_BUILD_ENV_FAILED
-    }
-    
-    # Activate virtual environment
-    # shellcheck source=/dev/null
-    source "${BUILD_VENV}/bin/activate" || {
-        log_error "Failed to activate build environment"
-        exit $EXIT_BUILD_ENV_FAILED
-    }
-    
-    # Install build tools
-    log_progress "Installing build tools"
-    pip install --quiet --upgrade pip || {
-        log_error "Failed to upgrade pip"
-        exit $EXIT_BUILD_ENV_FAILED
-    }
-    
-    pip install --quiet build || {
-        log_error "Failed to install build package"
-        exit $EXIT_BUILD_ENV_FAILED
-    }
-    
-    # Build the package
-    log_progress "Building package"
-    python -m build || {
+    # Build the package using uv
+    log_progress "Building package using uv"
+    uv run --group build python -m build || {
         log_error "Package build failed"
         exit $EXIT_BUILD_FAILED
     }
@@ -115,12 +81,6 @@ main() {
         cat "$CHECKSUMS_FILE"
     fi
     
-    # Deactivate virtual environment
-    deactivate
-    
-    # Cleanup
-    cleanup
-    
     log_timer "build"
     log_success "Package build completed successfully"
     
@@ -134,9 +94,6 @@ main() {
     
     exit $EXIT_SUCCESS
 }
-
-# Set cleanup trap
-trap cleanup EXIT
 
 # Run main function
 main "$@"

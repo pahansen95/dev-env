@@ -5,12 +5,15 @@ requires-python = ">=3.13"
 dependencies = []
 description = "Zero-dependency development environment management tool"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 
 [project.scripts]
 dev-env = "dev_env.cli:main"
 
 [dependency-groups]
+build = [
+    "build>=1.2.2.post1",
+]
 dev = [
     "mypy>=1.15.0",
     "pre-commit>=4.2.0",
