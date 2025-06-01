@@ -1,0 +1,4 @@
+[submodule "vendor/github.com/Textualize/rich"]
+	path = vendor/github.com/Textualize/rich
+	url = git@github.com:Textualize/rich.git
+	branch = v14.0.0
