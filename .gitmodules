@@ -2,3 +2,6 @@
 	path = vendor/github.com/Textualize/rich
 	url = git@github.com:Textualize/rich.git
 	branch = v14.0.0
+[submodule "vendor/github.com/tqdm/tqdm"]
+	path = vendor/github.com/tqdm/tqdm
+	url = git@github.com:tqdm/tqdm.git
