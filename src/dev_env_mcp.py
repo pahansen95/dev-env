@@ -764,7 +764,7 @@ def find_pattern_regex(
               "line": line_num,
               "match": match.group(0),
               "full_line": line.strip(),
-              "context": "\n".join(f"{start + i + 1}: {l}" for i, l in enumerate(context)),
+              "context": "\n".join(f"{start + i + 1}: {line}" for i, line in enumerate(context)),
             }
           )
 
