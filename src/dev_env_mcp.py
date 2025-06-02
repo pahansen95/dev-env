@@ -1014,7 +1014,7 @@ def main():
   run_parser.add_argument("project_dir", help="Project directory to serve from")
 
   # Validate command
-  validate_parser = subparsers.add_parser("validate", help="Validate the MCP server syntax and configuration")
+  _validate_parser = subparsers.add_parser("validate", help="Validate the MCP server syntax and configuration")
 
   args = parser.parse_args()
 
