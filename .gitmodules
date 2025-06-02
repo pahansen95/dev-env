@@ -5,3 +5,9 @@
 [submodule "vendor/github.com/tqdm/tqdm"]
 	path = vendor/github.com/tqdm/tqdm
 	url = git@github.com:tqdm/tqdm.git
+[submodule "vendor/github.com/tartley/colorama"]
+	path = vendor/github.com/tartley/colorama
+	url = https://github.com/tartley/colorama
+[submodule "vendor/github.com/Textualize/textual"]
+	path = vendor/github.com/Textualize/textual
+	url = https://github.com/Textualize/textual.git
