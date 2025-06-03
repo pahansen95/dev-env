@@ -207,86 +207,229 @@ def create_directory(path: str) -> str:
   return f"Successfully created directory: {path}"
 
 
+# Consolidated Discovery Operations
+
+
 @mcp.tool()
-def find_files(pattern: str = "*", directory: str = ".") -> list[str]:
-  """Find files matching a pattern in the project"""
-  logger.info(f"find_files called with pattern='{pattern}' in directory='{directory}'")
+def find(
+  query: str,
+  match_type: str = "glob",  # "glob", "name", "exact"
+  target_type: str = "both",  # "file", "dir", "both"
+  directory: str = ".",
+) -> list[str]:
+  """Find files and directories using various matching strategies
+
+  Args:
+      query: Search query (glob pattern, name substring, or exact name)
+      match_type: Matching strategy - "glob" (wildcards), "name" (substring), or "exact"
+      target_type: What to find - "file", "dir", or "both"
+      directory: Starting directory for search (default: project root)
+
+  Returns:
+      List of matching paths relative to project root
+  """
+  logger.info(f"find called with query='{query}', match_type='{match_type}', target_type='{target_type}'")
+
+  if match_type not in ["glob", "name", "exact"]:
+    raise ValueError("match_type must be 'glob', 'name', or 'exact'")
+  if target_type not in ["file", "dir", "both"]:
+    raise ValueError("target_type must be 'file', 'dir', or 'both'")
+
   search_dir = get_safe_path(directory, must_exist=True)
-  git_root = find_git_root()
-
-  # Use rglob for recursive search if pattern contains '**'
-  if "**" in pattern:
-    matches = search_dir.rglob(pattern.replace("**/", ""))
-  else:
-    matches = search_dir.glob(pattern)
-
-  files = [str(m.relative_to(git_root)) for m in matches if m.is_file()]
-  logger.info(f"Found {len(files)} files matching pattern '{pattern}'")
-  return sorted(files)
-
-
-# Discovery Operations
-@mcp.tool()
-def find_pattern_in_files(pattern: str, file_pattern: str = "**/*.py", max_files: int = 100) -> dict[str, list[str]]:
-  """Find a pattern in files matching the given file pattern"""
-  logger.info(f"find_pattern_in_files called with pattern='{pattern}', file_pattern='{file_pattern}'")
-
-  git_root = find_git_root()
-  results = {}
-  files_searched = 0
-
-  for file_path in git_root.rglob(file_pattern.replace("**/", "")):
-    if files_searched >= max_files:
-      results["warning"] = f"Stopped after searching {max_files} files"
-      break
-
-    if not file_path.is_file():
-      continue
-
-    files_searched += 1
-
-    try:
-      content = file_path.read_text(encoding="utf-8")
-      matches = []
-
-      for line_num, line in enumerate(content.splitlines(), 1):
-        if pattern in line:
-          matches.append(f"{line_num}: {line.strip()}")
-
-      if matches:
-        results[str(file_path.relative_to(git_root))] = matches
-
-    except Exception:
-      # Skip files that can't be read (binary, permissions, etc)
-      continue
-
-  logger.info(f"Searched {files_searched} files, found pattern in {len(results)} files")
-  return results
-
-
-@mcp.tool()
-def find_by_name(name: str, type: str = "both") -> list[str]:
-  """Find files or folders by name. Type can be 'file', 'dir', or 'both'"""
-  logger.info(f"find_by_name called with name='{name}', type='{type}'")
-
-  if type not in ["file", "dir", "both"]:
-    raise ValueError("type must be 'file', 'dir', or 'both'")
-
   git_root = find_git_root()
   results = []
 
-  for path in git_root.rglob(f"*{name}*"):
-    relative_path = str(path.relative_to(git_root))
+  # Glob pattern matching (replaces find_files)
+  if match_type == "glob":
+    # Use rglob for recursive search if pattern contains '**'
+    if "**" in query:
+      matches = search_dir.rglob(query.replace("**/", ""))
+    else:
+      matches = search_dir.glob(query)
 
-    if type == "file" and path.is_file():
-      results.append(relative_path)
-    elif type == "dir" and path.is_dir():
-      results.append(relative_path + "/")
-    elif type == "both":
-      results.append(relative_path + ("/" if path.is_dir() else ""))
+    for path in matches:
+      relative_path = str(path.relative_to(git_root))
+      if target_type == "file" and path.is_file():
+        results.append(relative_path)
+      elif target_type == "dir" and path.is_dir():
+        results.append(relative_path + "/")
+      elif target_type == "both":
+        results.append(relative_path + ("/" if path.is_dir() else ""))
 
-  logger.info(f"Found {len(results)} items matching '{name}'")
+  # Name substring matching (replaces find_by_name)
+  elif match_type == "name":
+    for path in search_dir.rglob("*"):
+      if query in path.name:
+        relative_path = str(path.relative_to(git_root))
+        if target_type == "file" and path.is_file():
+          results.append(relative_path)
+        elif target_type == "dir" and path.is_dir():
+          results.append(relative_path + "/")
+        elif target_type == "both":
+          results.append(relative_path + ("/" if path.is_dir() else ""))
+
+  # Exact name matching
+  elif match_type == "exact":
+    for path in search_dir.rglob("*"):
+      if path.name == query:
+        relative_path = str(path.relative_to(git_root))
+        if target_type == "file" and path.is_file():
+          results.append(relative_path)
+        elif target_type == "dir" and path.is_dir():
+          results.append(relative_path + "/")
+        elif target_type == "both":
+          results.append(relative_path + ("/" if path.is_dir() else ""))
+
+  logger.info(f"Found {len(results)} items matching query '{query}'")
   return sorted(results)
+
+
+@mcp.tool()
+def search(
+  pattern: str,
+  search_type: str = "string",  # "string", "regex", "ast"
+  file_pattern: str = "**/*",
+  max_files: int = 100,
+  context_lines: int = 0,
+  definition_type: str = None,  # For AST searches: "function", "class", or "any"
+) -> list[dict]:
+  """Universal search tool for finding patterns in project files
+
+  Args:
+      pattern: Search pattern (string, regex, or function/class name)
+      search_type: Type of search - "string", "regex", or "ast" (for Python definitions)
+      file_pattern: Glob pattern for files to search (default: all files)
+      max_files: Maximum number of files to search
+      context_lines: Number of context lines before/after match (for string/regex)
+      definition_type: For AST search - "function", "class", or "any" (default: "any")
+
+  Returns:
+      List of matches with file path, line number, and match details
+  """
+  logger.info(f"search called with pattern='{pattern}', search_type='{search_type}', file_pattern='{file_pattern}'")
+
+  if search_type not in ["string", "regex", "ast"]:
+    raise ValueError("search_type must be 'string', 'regex', or 'ast'")
+
+  git_root = find_git_root()
+  results = []
+  files_searched = 0
+
+  # AST-based search for Python code definitions
+  if search_type == "ast":
+    if definition_type is None:
+      definition_type = "any"
+
+    # Only search Python files for AST
+    if not file_pattern.endswith(".py"):
+      file_pattern = "**/*.py"
+
+    for file_path in git_root.rglob(file_pattern.replace("**/", "")):
+      if not file_path.is_file():
+        continue
+
+      try:
+        content = file_path.read_text()
+        tree = ast.parse(content, filename=str(file_path))
+
+        # Walk AST to find definitions
+        for node in ast.walk(tree):
+          match = False
+          node_type = None
+
+          if definition_type in ("function", "any") and isinstance(node, ast.FunctionDef):
+            if node.name == pattern:
+              match = True
+              node_type = "function"
+
+          elif definition_type in ("class", "any") and isinstance(node, ast.ClassDef):
+            if node.name == pattern:
+              match = True
+              node_type = "class"
+
+          if match and hasattr(node, "lineno"):
+            # Get preview lines
+            lines = content.splitlines()
+            start = max(0, node.lineno - 1)
+            end = min(len(lines), node.lineno + 4)
+            preview = lines[start:end]
+
+            results.append(
+              {
+                "file": str(file_path.relative_to(git_root)),
+                "line": node.lineno,
+                "type": node_type,
+                "name": node.name,
+                "preview": "\n".join(preview),
+              }
+            )
+
+      except (SyntaxError, Exception) as e:
+        logger.debug(f"Error parsing {file_path}: {e}")
+        continue
+
+  # String and regex searches
+  else:
+    # Compile regex if needed
+    if search_type == "regex":
+      try:
+        regex = re.compile(pattern)
+      except re.error as e:
+        logger.error(f"Invalid regex pattern: {e}")
+        return [{"error": f"Invalid regex pattern: {str(e)}"}]
+
+    for file_path in git_root.rglob(file_pattern.replace("**/", "")):
+      if files_searched >= max_files:
+        if not results:  # Only add warning if we haven't found anything yet
+          results.append({"warning": f"Stopped after searching {max_files} files"})
+        break
+
+      if not file_path.is_file():
+        continue
+
+      files_searched += 1
+
+      try:
+        content = file_path.read_text(encoding="utf-8")
+        lines = content.splitlines()
+
+        for line_num, line in enumerate(lines, 1):
+          match_found = False
+          match_text = None
+
+          if search_type == "string":
+            if pattern in line:
+              match_found = True
+              match_text = pattern
+          else:  # regex
+            match = regex.search(line)
+            if match:
+              match_found = True
+              match_text = match.group(0)
+
+          if match_found:
+            result = {
+              "file": str(file_path.relative_to(git_root)),
+              "line": line_num,
+              "match": match_text,
+              "full_line": line.strip(),
+            }
+
+            # Add context if requested
+            if context_lines > 0:
+              start = max(0, line_num - context_lines - 1)
+              end = min(len(lines), line_num + context_lines)
+              context = lines[start:end]
+              result["context"] = "\n".join(f"{start + i + 1}: {line}" for i, line in enumerate(context))
+
+            results.append(result)
+
+      except (UnicodeDecodeError, PermissionError):
+        # Skip binary files or files we can't read
+        continue
+
+  logger.info(f"Searched {files_searched} files, found {len(results)} matches")
+  return results
 
 
 # Complete Filesystem CRUD Operations
@@ -535,6 +678,158 @@ def validate_syntax(file_path: Path) -> dict:
     }
 
 
+class PatchHunk:
+  """Represents a single hunk in a patch"""
+
+  def __init__(self, old_start: int, old_count: int, new_start: int, new_count: int):
+    self.old_start = old_start
+    self.old_count = old_count
+    self.new_start = new_start
+    self.new_count = new_count
+    self.raw_lines = []  # All lines in order with their types
+
+  def get_expected_content(self) -> list[str]:
+    """Get the content we expect to find in the file"""
+    return [line for line_type, line in self.raw_lines if line_type in (" ", "-")]
+
+  def get_replacement_content(self) -> list[str]:
+    """Get the content to replace with"""
+    return [line for line_type, line in self.raw_lines if line_type in (" ", "+")]
+
+
+class ImprovedPatchParser:
+  """Improved patch parser with better error handling"""
+
+  def __init__(self, patch_content: str):
+    self.patch_lines = patch_content.splitlines(keepends=True)
+    self.hunks: list[PatchHunk] = []
+    self._parse()
+
+  def _parse(self):
+    """Parse the patch into hunks"""
+    hunk_header_re = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+    current_hunk = None
+
+    for line in self.patch_lines:
+      # Skip file headers
+      if line.startswith("---") or line.startswith("+++"):
+        continue
+
+      # Check for hunk header
+      match = hunk_header_re.match(line)
+      if match:
+        # Save previous hunk
+        if current_hunk:
+          self.hunks.append(current_hunk)
+
+        # Create new hunk
+        old_start = int(match.group(1))
+        old_count = int(match.group(2) or 1)
+        new_start = int(match.group(3))
+        new_count = int(match.group(4) or 1)
+
+        current_hunk = PatchHunk(old_start, old_count, new_start, new_count)
+
+      elif current_hunk and line:
+        # Process hunk content
+        if line.startswith("-") and len(line) > 1:
+          current_hunk.raw_lines.append(("-", line[1:]))
+        elif line.startswith("+") and len(line) > 1:
+          current_hunk.raw_lines.append(("+", line[1:]))
+        elif line.startswith(" "):
+          current_hunk.raw_lines.append((" ", line[1:]))
+
+    # Don't forget the last hunk
+    if current_hunk:
+      self.hunks.append(current_hunk)
+
+
+class ContextMatcher:
+  """Sophisticated context matching with fuzzy logic"""
+
+  def __init__(self, tolerance: float = 0.85):
+    self.tolerance = tolerance
+
+  def find_best_match(self, expected_lines: list[str], file_lines: list[str], start_hint: int) -> int | None:
+    """Find the best matching position for expected content"""
+    # First try exact match at expected position
+    if self._try_exact_match(expected_lines, file_lines, start_hint):
+      return start_hint
+
+    # Try searching nearby (± 10 lines)
+    search_range = 10
+    for offset in range(1, search_range + 1):
+      # Try forward
+      if start_hint + offset < len(file_lines):
+        if self._try_exact_match(expected_lines, file_lines, start_hint + offset):
+          logger.info(f"Found exact match {offset} lines forward")
+          return start_hint + offset
+
+      # Try backward
+      if start_hint - offset >= 0:
+        if self._try_exact_match(expected_lines, file_lines, start_hint - offset):
+          logger.info(f"Found exact match {offset} lines backward")
+          return start_hint - offset
+
+    # Fall back to fuzzy matching
+    best_pos, best_score = self._fuzzy_search(expected_lines, file_lines, start_hint)
+    if best_score >= self.tolerance:
+      logger.info(f"Found fuzzy match at line {best_pos + 1} with score {best_score:.2f}")
+      return best_pos
+
+    return None
+
+  def _try_exact_match(self, expected: list[str], file_lines: list[str], start: int) -> bool:
+    """Check if expected lines exactly match at given position"""
+    if start < 0 or start + len(expected) > len(file_lines):
+      return False
+
+    for i, expected_line in enumerate(expected):
+      if self._normalize_line(expected_line) != self._normalize_line(file_lines[start + i]):
+        return False
+
+    return True
+
+  def _fuzzy_search(self, expected: list[str], file_lines: list[str], hint: int) -> tuple[int, float]:
+    """Search for best fuzzy match near hint position"""
+    best_pos = hint - 1
+    best_score = 0.0
+
+    # Search window based on file size
+    window = min(50, len(file_lines) // 10)
+    start = max(0, hint - window)
+    end = min(len(file_lines) - len(expected) + 1, hint + window)
+
+    for pos in range(start, end):
+      score = self._calculate_similarity(expected, file_lines[pos : pos + len(expected)])
+      if score > best_score:
+        best_score = score
+        best_pos = pos
+
+    return best_pos, best_score
+
+  def _calculate_similarity(self, expected: list[str], actual: list[str]) -> float:
+    """Calculate similarity score between line sequences"""
+    if len(expected) != len(actual):
+      return 0.0
+
+    scores = []
+    for exp_line, act_line in zip(expected, actual):
+      # Normalize and compare
+      exp_norm = self._normalize_line(exp_line)
+      act_norm = self._normalize_line(act_line)
+
+      matcher = difflib.SequenceMatcher(None, exp_norm, act_norm)
+      scores.append(matcher.ratio())
+
+    return sum(scores) / len(scores) if scores else 0.0
+
+  def _normalize_line(self, line: str) -> str:
+    """Normalize line for comparison"""
+    # Strip trailing whitespace but preserve indentation
+    return line.rstrip()
+
+
 @mcp.tool()
 def apply_patch(file_path: str, patch: str) -> dict:
   """Apply a unified diff patch to a file using difflib
@@ -549,6 +844,11 @@ def apply_patch(file_path: str, patch: str) -> dict:
   logger.info(f"apply_patch called for {file_path}")
 
   try:
+    # Parse the patch
+    parser = ImprovedPatchParser(patch)
+    if not parser.hunks:
+      return {"status": "error", "error": "No valid hunks found in patch"}
+
     # Validate and resolve path
     target_path = get_safe_path(file_path, must_exist=True)
 
@@ -559,85 +859,71 @@ def apply_patch(file_path: str, patch: str) -> dict:
 
     # Read current content
     original_content = target_path.read_text()
-    original_lines = original_content.splitlines(keepends=True)
+    working_lines = original_content.splitlines(keepends=True)
 
-    # Use difflib.restore to apply the patch
-    # Since difflib doesn't have direct patch application, we'll use a robust approach
-    patch_lines = patch.splitlines(keepends=True)
+    # Apply hunks with sophisticated matching
+    matcher = ContextMatcher()
+    applied_hunks = 0
+    offset = 0  # Track cumulative line offset
 
-    # Parse hunks with proper offset tracking
-    hunks = []
-    current_hunk = None
-    hunk_header_re = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+    # Sort hunks by line number to apply in order
+    sorted_hunks = sorted(parser.hunks, key=lambda h: h.old_start)
 
-    for line in patch_lines:
-      match = hunk_header_re.match(line)
-      if match:
-        if current_hunk:
-          hunks.append(current_hunk)
+    for hunk in sorted_hunks:
+      # Adjust for previous modifications
+      adjusted_start = hunk.old_start - 1 + offset
 
-        old_start = int(match.group(1))
-        old_count = int(match.group(2) or 1)
-        new_start = int(match.group(3))
-        new_count = int(match.group(4) or 1)
+      # Get expected content
+      expected_lines = hunk.get_expected_content()
 
-        current_hunk = {
-          "old_start": old_start,
-          "old_count": old_count,
-          "new_start": new_start,
-          "new_count": new_count,
-          "old_lines": [],
-          "new_lines": [],
-        }
-      elif current_hunk is not None:
-        if line.startswith("-") and not line.startswith("---"):
-          current_hunk["old_lines"].append(line[1:])
-        elif line.startswith("+") and not line.startswith("+++"):
-          current_hunk["new_lines"].append(line[1:])
-        elif line.startswith(" "):
-          current_hunk["old_lines"].append(line[1:])
-          current_hunk["new_lines"].append(line[1:])
+      # Find best match position
+      match_pos = matcher.find_best_match(expected_lines, working_lines, adjusted_start)
 
-    if current_hunk:
-      hunks.append(current_hunk)
+      if match_pos is None:
+        error_msg = f"Failed to find context for hunk starting at line {hunk.old_start}"
+        logger.error(error_msg)
 
-    # Apply hunks from bottom to top to preserve line numbers
-    result_lines = original_lines.copy()
-    lines_changed = 0
+        # Restore from backup
+        if backup_path and backup_path.exists():
+          target_path.write_text(original_content)
+          logger.info("Restored from backup after error")
 
-    for hunk in reversed(hunks):
-      start_idx = hunk["old_start"] - 1
-      end_idx = start_idx + hunk["old_count"]
+        return {"status": "error", "error": error_msg, "failed_hunk": hunk.old_start}
 
-      # Verify context matches
-      expected_lines = hunk["old_lines"]
-      actual_lines = result_lines[start_idx:end_idx]
+      # Apply the hunk
+      replacement = hunk.get_replacement_content()
 
-      # Compare without worrying about newline differences
-      expected_content = "".join(expected_lines)
-      actual_content = "".join(actual_lines)
+      # Ensure proper line endings
+      if working_lines and replacement and not replacement[-1].endswith("\n"):
+        replacement[-1] += "\n"
 
-      if expected_content.strip() != actual_content.strip():
-        # Try fuzzy matching using difflib
-        matcher = difflib.SequenceMatcher(None, actual_content, expected_content)
-        if matcher.ratio() < 0.8:  # Less than 80% similarity
-          raise ValueError(f"Patch context doesn't match at line {hunk['old_start']}")
+      # Perform replacement
+      end_pos = match_pos + len(expected_lines)
+      working_lines[match_pos:end_pos] = replacement
 
-      # Apply the change
-      result_lines[start_idx:end_idx] = hunk["new_lines"]
-      lines_changed += len(hunk["old_lines"]) + len(hunk["new_lines"])
+      # Update offset for next hunk
+      offset += len(replacement) - len(expected_lines)
+      applied_hunks += 1
 
-    # Write patched content
-    patched_content = "".join(result_lines)
-    target_path.write_text(patched_content)
+      logger.info(f"Applied hunk {applied_hunks}/{len(parser.hunks)} at line {match_pos + 1}")
+
+    # Write result
+    result_content = "".join(working_lines)
+    target_path.write_text(result_content)
 
     # Validate syntax after patching
     validation = validate_syntax(target_path)
+
+    # Calculate total lines changed
+    lines_changed = sum(
+      len([l for t, l in h.raw_lines if t == "-"]) + len([l for t, l in h.raw_lines if t == "+"]) for h in parser.hunks
+    )
 
     return {
       "status": "success",
       "backup_path": str(backup_path.relative_to(find_git_root())),
       "lines_changed": lines_changed,
+      "hunks_applied": applied_hunks,
       "syntax_validation": validation,
     }
 
@@ -651,199 +937,6 @@ def apply_patch(file_path: str, patch: str) -> dict:
       except Exception as restore_error:
         logger.error(f"Failed to restore backup: {restore_error}")
     return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
-def edit_lines(file_path: str, start_line: int, end_line: int, replacement: str) -> dict:
-  """Replace specific line range in a file (1-indexed)
-
-  Args:
-      file_path: Path to file to edit
-      start_line: Starting line number (inclusive, 1-indexed)
-      end_line: Ending line number (inclusive, 1-indexed)
-      replacement: Text to replace the line range with
-
-  Returns:
-      dict with status and details
-  """
-  logger.info(f"edit_lines called for {file_path} lines {start_line}-{end_line}")
-
-  try:
-    # Validate path
-    target_path = get_safe_path(file_path, must_exist=True)
-
-    # Read file
-    content = target_path.read_text()
-    lines = content.splitlines(keepends=True)
-
-    # Validate line numbers
-    if start_line < 1 or end_line < start_line:
-      raise ValueError("Invalid line range")
-    if end_line > len(lines):
-      raise ValueError(f"End line {end_line} exceeds file length {len(lines)}")
-
-    # Create backup
-    backup_name = f".{target_path.name}.{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
-    backup_path = target_path.parent / backup_name
-    backup_path.write_text(content)
-
-    # Prepare replacement lines
-    replacement_lines = replacement.splitlines(keepends=True)
-    if replacement and not replacement.endswith("\n"):
-      replacement_lines[-1] += "\n"
-
-    # Perform replacement
-    new_lines = lines[: start_line - 1] + replacement_lines + lines[end_line:]
-
-    # Write result
-    target_path.write_text("".join(new_lines))
-
-    return {
-      "status": "success",
-      "backup_path": str(backup_path.relative_to(find_git_root())),
-      "lines_replaced": end_line - start_line + 1,
-      "new_line_count": len(replacement_lines),
-    }
-
-  except Exception as e:
-    logger.error(f"Failed to edit lines: {e}")
-    return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
-def find_pattern_regex(
-  pattern: str, file_pattern: str = "**/*", max_files: int = 100, context_lines: int = 2
-) -> list[dict]:
-  """Find regex patterns in files with context
-
-  Args:
-      pattern: Regular expression pattern to search for
-      file_pattern: Glob pattern for files to search
-      max_files: Maximum number of files to search
-      context_lines: Number of context lines before/after match
-
-  Returns:
-      List of matches with file path, line number, match text, and context
-  """
-  logger.info(f"find_pattern_regex called with pattern='{pattern}', file_pattern='{file_pattern}'")
-
-  try:
-    regex = re.compile(pattern)
-  except re.error as e:
-    logger.error(f"Invalid regex pattern: {e}")
-    return [{"error": f"Invalid regex pattern: {str(e)}"}]
-
-  git_root = find_git_root()
-  results = []
-  files_searched = 0
-
-  for file_path in git_root.rglob(file_pattern.replace("**/", "")):
-    if files_searched >= max_files:
-      break
-
-    if not file_path.is_file():
-      continue
-
-    files_searched += 1
-
-    try:
-      content = file_path.read_text(encoding="utf-8")
-      lines = content.splitlines()
-
-      for line_num, line in enumerate(lines, 1):
-        match = regex.search(line)
-        if match:
-          # Get context lines
-          start = max(0, line_num - context_lines - 1)
-          end = min(len(lines), line_num + context_lines)
-          context = lines[start:end]
-
-          results.append(
-            {
-              "file": str(file_path.relative_to(git_root)),
-              "line": line_num,
-              "match": match.group(0),
-              "full_line": line.strip(),
-              "context": "\n".join(f"{start + i + 1}: {line}" for i, line in enumerate(context)),
-            }
-          )
-
-    except (UnicodeDecodeError, PermissionError):
-      # Skip binary files or files we can't read
-      continue
-
-  logger.info(f"Searched {files_searched} files, found {len(results)} matches")
-  return results
-
-
-@mcp.tool()
-def find_code_definition(name: str, definition_type: str = "any", file_pattern: str = "**/*.py") -> list[dict]:
-  """Find function or class definitions in Python files
-
-  Args:
-      name: Name of function/class to find
-      definition_type: 'function', 'class', or 'any'
-      file_pattern: Glob pattern for files to search
-
-  Returns:
-      List of matches with file path, line number, and preview
-  """
-  logger.info(f"find_code_definition called for '{name}' type={definition_type}")
-
-  results = []
-  git_root = find_git_root()
-
-  # Search Python files
-  for file_path in git_root.rglob(file_pattern.replace("**/", "")):
-    if not file_path.is_file():
-      continue
-
-    try:
-      content = file_path.read_text()
-      tree = ast.parse(content, filename=str(file_path))
-
-      # Walk AST to find definitions
-      for node in ast.walk(tree):
-        match = False
-        node_type = None
-
-        if definition_type in ("function", "any") and isinstance(node, ast.FunctionDef):
-          if node.name == name:
-            match = True
-            node_type = "function"
-
-        elif definition_type in ("class", "any") and isinstance(node, ast.ClassDef):
-          if node.name == name:
-            match = True
-            node_type = "class"
-
-        if match and hasattr(node, "lineno"):
-          # Get preview lines
-          lines = content.splitlines()
-          start = max(0, node.lineno - 1)
-          end = min(len(lines), node.lineno + 4)
-          preview = lines[start:end]
-
-          results.append(
-            {
-              "file": str(file_path.relative_to(git_root)),
-              "line": node.lineno,
-              "type": node_type,
-              "name": node.name,
-              "preview": "\n".join(preview),
-            }
-          )
-
-    except SyntaxError:
-      # Skip files with syntax errors
-      logger.debug(f"Syntax error in {file_path}, skipping")
-      continue
-    except Exception as e:
-      logger.debug(f"Error parsing {file_path}: {e}")
-      continue
-
-  logger.info(f"Found {len(results)} definitions of '{name}'")
-  return results
 
 
 # CLI Commands
