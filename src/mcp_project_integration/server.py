@@ -21,3 +21,4 @@ except subprocess.CalledProcessError:
 mcp = FastMCP(server_display_name)
 
 # Import and register all tools - this happens when server module is imported
+from . import tools  # noqa: F401 E402
