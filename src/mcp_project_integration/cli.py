@@ -325,10 +325,10 @@ def main():
   claude_parser.add_argument("-e", "--env", action="append", help="Environment variables to set (format: KEY=VALUE)")
 
   # Run command
-  run_parser = subparsers.add_parser("run", help="Run the MCP server")
+  _run_parser = subparsers.add_parser("run", help="Run the MCP server")
 
   # Validate command
-  validate_parser = subparsers.add_parser("validate", help="Validate the MCP server syntax and configuration")
+  _validate_parser = subparsers.add_parser("validate", help="Validate the MCP server syntax and configuration")
 
   # Parse arguments
   args = parser.parse_args()
