@@ -30,6 +30,37 @@ def install_command(args):
       f"No .venv directory found at {project_root}\nPlease create a virtual environment with: python -m venv .venv"
     )
 
+  # Ensure module is installed in venv via symlink
+  module_name = "mcp_project_integration"
+  module_source = project_root / "src" / module_name
+
+  if not module_source.is_dir() or not (module_source / "__init__.py").exists():
+    raise FileNotFoundError(
+      f"Module not found at expected location: {module_source}\nEnsure your module exists under src/"
+    )
+
+  # Find site-packages in venv
+  if sys.platform == "win32":
+    site_packages = venv_path / "Lib" / "site-packages"
+  else:
+    # Find the correct Python version directory
+    python_dirs = list((venv_path / "lib").glob("python*"))
+    if not python_dirs:
+      raise FileNotFoundError(f"No Python installation found in venv: {venv_path}")
+    site_packages = python_dirs[0] / "site-packages"
+
+  # Create symlink if it doesn't exist
+  symlink_target = site_packages / module_name
+  if not symlink_target.exists():
+    try:
+      symlink_target.symlink_to(module_source)
+      logger.info(f"Created module symlink: {symlink_target} -> {module_source}")
+    except OSError as e:
+      logger.warning(f"Failed to create symlink: {e}")
+      logger.info("Consider running: pip install -e . in your project root")
+  elif symlink_target.is_symlink():
+    logger.info(f"Module symlink exists: {symlink_target} -> {symlink_target.resolve()}")
+
   # Get project name from git
   git_project_name = get_git_project_name()
   logger.info(f"Detected project name from git: {git_project_name}")
@@ -138,7 +169,7 @@ def install_command(args):
 
   logger.info(f"Successfully installed server '{server_name}' in Claude Desktop")
   logger.info(f"Using Python from: {server_config['command']}")
-  logger.info(f"Working directory: {server_config['cwd']}")
+  logger.info(f"Working directory: {project_root}")
   logger.info(f"Git project: {git_project_name}")
 
 
@@ -238,8 +269,6 @@ def run_command(args):
   logger.info(f"Working directory: {os.getcwd()}")
   logger.info(f"Python: {sys.executable}")
 
-  project_dir = Path(args.project_dir).resolve()
-
   # Verify we're in a git repository
   try:
     git_root = find_git_root()
@@ -247,7 +276,7 @@ def run_command(args):
     git_name = get_git_project_name()
     logger.info(f"Git project name: {git_name}")
   except subprocess.CalledProcessError:
-    raise RuntimeError(f"Directory is not a git repository: {project_dir}")
+    raise RuntimeError(f"Directory is not a git repository: {os.getcwd()}")
 
   # Run with stdio transport
   mcp.run(transport="stdio")
@@ -296,10 +325,10 @@ def main():
   claude_parser.add_argument("-e", "--env", action="append", help="Environment variables to set (format: KEY=VALUE)")
 
   # Run command
-  _run_parser = subparsers.add_parser("run", help="Run the MCP server")
+  run_parser = subparsers.add_parser("run", help="Run the MCP server")
 
   # Validate command
-  _validate_parser = subparsers.add_parser("validate", help="Validate the MCP server syntax and configuration")
+  validate_parser = subparsers.add_parser("validate", help="Validate the MCP server syntax and configuration")
 
   # Parse arguments
   args = parser.parse_args()
