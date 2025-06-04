@@ -164,7 +164,7 @@ def start_session(goal: str) -> Dict:
     },
     {
       "title": "Refactor with constraints",
-      "code": """result = session_run_task(session_id, 
+      "code": """result = session_run_task(session_id,
     "Extract database queries into repository pattern, maintain existing API")""",
       "explanation": "Complex refactoring with requirements",
       "complexity": 2,
