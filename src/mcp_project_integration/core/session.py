@@ -1,7 +1,175 @@
-"""Minimal session management for Claude Code integration
+"""Session and task management for Claude Code integration
 
-Provides lightweight session and task tracking with Git integration
-for managing Claude Code development workflows.
+# CodingSession Mental Model
+
+A CodingSession represents a stateful development context that maintains coherent
+progress toward a specific engineering goal. It serves as a persistent container
+for related development activities, preserving accumulated knowledge across multiple
+task executions.
+
+## Core Properties
+
+**Goal Definition**
+- Primary objective defining the engineering outcome
+- Measurable success criteria for completion
+- Explicit scope boundaries for included work
+
+**Contextual State**
+- File system awareness tracking modifications
+- Decision history preserving choices and rationale
+- Knowledge accumulation of discovered patterns
+
+**Execution Environment**
+- Persistent binding to development container
+- Configured Claude Code capabilities and permissions
+- Resource limits for time and computation
+
+## Lifecycle Phases
+
+CodingSessions progress through distinct phases:
+
+1. **Initialization** - Establish goal and analyze starting state
+2. **Active Development** - Execute tasks toward objective
+3. **Checkpoint** - Persist progress at key milestones
+4. **Completion** - Verify goal achievement and finalize
+5. **Archival** - Preserve learnings for future reference
+
+## State Management
+
+Sessions maintain coherence through temporal continuity and spatial awareness:
+
+- Conversation memory persists across Claude invocations
+- File modification tracking maintains change history
+- Pattern recognition accumulates across task executions
+- Solution space refinement occurs through iterative development
+
+# DevTask Mental Model
+
+A DevTask represents a bounded transformation operation within a development
+environment. It encapsulates a specific change to the codebase state, executed
+through Claude Code's natural language interface.
+
+## Relationship to CodingSession
+
+DevTasks operate exclusively within the context of a CodingSession, inheriting
+accumulated knowledge and contributing back to the session's evolving state.
+This bidirectional relationship ensures:
+
+**Context Inheritance**
+- Tasks receive the session's accumulated file modification history
+- Pattern discoveries from previous tasks inform current execution
+- Decision rationale provides context for transformation choices
+
+**State Contribution**
+- Task results update the session's knowledge base
+- Discovered constraints propagate to future tasks
+- Verification outcomes influence subsequent operations
+
+**Progressive Refinement**
+- Each task builds upon previous session achievements
+- Failed attempts inform alternative approaches
+- Success patterns guide future task specifications
+
+## Core Properties
+
+**Transformation Specification**
+- Intent expressed in natural language
+- Scope defining affected codebase components
+- Constraints establishing execution boundaries
+
+**Execution Context**
+- Environment container or workspace
+- Working directory for file operations
+- Session state providing accumulated knowledge
+
+**Verification Contract**
+- Success criteria for completion determination
+- Validation strategy for correctness verification
+- Rollback capability for change reversal
+
+## Task Types
+
+DevTasks organize into distinct categories based on their transformation intent:
+
+- **Review** - Analyze code quality and suggest improvements
+- **Implement** - Generate code meeting specifications
+- **Test** - Create comprehensive test coverage
+- **Refactor** - Restructure while preserving behavior
+- **Document** - Add documentation and comments
+- **Debug** - Identify and resolve issues
+
+Each task type receives appropriate permissions and verification strategies
+aligned with its purpose.
+
+## Execution Lifecycle
+
+Tasks progress through predictable phases:
+
+1. **Specification** - Define intent and constraints
+2. **Context Loading** - Gather relevant state
+3. **Transformation** - Execute changes via Claude
+4. **Verification** - Validate success criteria
+5. **Integration** - Merge results into session
+
+# Context Accumulation Model
+
+The SessionContext maintains accumulated knowledge and state across task
+executions. It represents the growing understanding of the codebase and
+project conventions discovered through iterative development.
+
+## Knowledge Categories
+
+**Discovered Patterns**
+- Code style conventions detected through analysis
+- Architectural patterns observed in the codebase
+- Testing strategies and coverage expectations
+
+**Architectural Decisions**
+- Design choices made during development
+- Rationale for implementation approaches
+- Trade-offs considered and rejected
+
+**Verification History**
+- Test execution results from each task
+- Performance metrics and benchmarks
+- Coverage reports and quality indicators
+
+## Context Flow
+
+When a DevTask executes within a CodingSession:
+
+1. **Pre-execution Context Transfer**
+   - Task inherits session's file modification history
+   - Discovered patterns guide task approach
+   - Previous verification results inform constraints
+   - Session goal provides overarching direction
+
+2. **Execution with Awareness**
+   - Claude Code receives session context in prompts
+   - File operations consider previous modifications
+   - Pattern matching leverages accumulated knowledge
+   - Decision making reflects session history
+
+3. **Post-execution State Update**
+   - Task results merge into session state
+   - New patterns join discovered knowledge
+   - File changes update modification tracking
+   - Verification outcomes inform future tasks
+
+## Information Persistence
+
+The session maintains persistent Claude Code context through:
+- Conversation continuity across task invocations
+- Accumulated understanding of codebase structure
+- Progressive refinement of solution approaches
+- Historical awareness preventing repeated mistakes
+
+# Implementation Notes
+
+This module provides a simplified implementation focusing on core functionality.
+The design prioritizes Git-based state management and Python configuration files
+for human-readable persistence. Future iterations may expand to include automated
+pattern discovery and cross-session learning mechanisms.
 """
 
 import uuid

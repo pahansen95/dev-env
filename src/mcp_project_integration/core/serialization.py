@@ -1,7 +1,45 @@
 """Python configuration file serialization
 
-Provides a standardized approach for persisting configuration data as executable
-Python files, enabling human-readable configuration with native type support.
+# Configuration as Code Mental Model
+
+This module implements a fundamental design principle: configuration should be
+executable Python code rather than static data formats. This approach provides
+several key advantages:
+
+## Type Safety and Native Support
+
+Unlike JSON/YAML/TOML, Python configurations support:
+- Native datetime objects without string conversion
+- Enum types with proper validation
+- Path objects for filesystem operations
+- Complex type hierarchies and inheritance
+
+## Human Readability and Debugging
+
+Python configuration files are:
+- Directly executable for testing (`python config.py`)
+- Syntax-highlighted in all Python-aware editors
+- Debuggable with standard Python tools
+- Self-documenting through Python's type system
+
+## Version Control Benefits
+
+Python files provide:
+- Clear diff visibility for configuration changes
+- Ability to add comments and documentation
+- Conditional logic when needed (though discouraged)
+- Import capabilities for shared configuration
+
+## Implementation Philosophy
+
+The serializer maintains a balance between flexibility and safety:
+- Supports common Python types automatically
+- Preserves type information during round-trips
+- Generates clean, readable output
+- Handles nested structures gracefully
+
+This approach transforms configuration from passive data into active,
+verifiable code that participates in the development workflow.
 """
 
 import importlib.util

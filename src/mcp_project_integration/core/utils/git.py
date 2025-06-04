@@ -1,7 +1,53 @@
 """Git operations wrapper
 
-Encapsulates Git subprocess commands, providing a clean interface for version
-control operations while handling errors and parsing outputs consistently.
+# Git Operations Abstraction
+
+The GitOperations class provides a unified interface for Git subprocess commands,
+abstracting the complexity of command-line interactions into a type-safe Python API.
+It serves as the foundational layer for all version control operations within the
+MCP Project Integration system.
+
+## Architecture
+
+Git operations are fundamentally subprocess executions that require careful handling
+of stdout, stderr, and return codes. This abstraction layer transforms these raw
+interactions into predictable, well-typed Python methods with consistent error
+handling and output parsing.
+
+Key characteristics:
+- Subprocess command encapsulation
+- Consistent error propagation
+- Structured output parsing
+- Automatic logging integration
+
+## Design Principles
+
+**Type Safety**
+All methods return strongly-typed results rather than raw strings, enabling
+compile-time verification and IDE support for Git operations.
+
+**Error Transparency**
+Git command failures are captured with full context (stdout, stderr, exit codes)
+and propagated as Python exceptions with meaningful error messages.
+
+**Minimal Abstraction**
+The interface closely mirrors Git's command-line structure, making it intuitive
+for developers familiar with Git while providing Python-native conveniences.
+
+**Stateless Operations**
+Each method is stateless and side-effect free (beyond Git operations), enabling
+safe concurrent usage and predictable behavior.
+
+## Implementation Philosophy
+
+This module prioritizes reliability and clarity over feature completeness. Rather
+than wrapping every Git command, it provides essential operations needed for
+automated development workflows while maintaining direct Git command access for
+edge cases.
+
+The GitOperations abstraction transforms error-prone string manipulation of Git
+commands into reliable, testable Python methods that form the foundation for
+higher-level version control workflows.
 """
 
 import subprocess

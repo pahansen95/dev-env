@@ -1,7 +1,50 @@
 """Project-specific utilities and safety mechanisms
 
-Provides project boundary validation and Git project information
-retrieval for ensuring operations remain within safe boundaries.
+# Project Boundary System
+
+The Project Boundary System provides a security and organizational framework that
+ensures all file operations remain within the Git repository boundaries. It serves
+as a protective layer preventing accidental or malicious operations from affecting
+files outside the project scope.
+
+## Core Principles
+
+**Git-Centric Boundaries**
+All operations are scoped to the Git repository root, using Git's own understanding
+of project boundaries as the authoritative source. This ensures consistency with
+version control and prevents operations on untracked external files.
+
+**Path Validation Strategy**
+- Resolve symbolic links to prevent escape via symlink manipulation
+- Validate parent directory existence for new file creation
+- Maintain original paths for user clarity while validating resolved paths
+
+**Project Identity**
+The system derives project identity from Git configuration, preferring:
+1. Remote origin repository name (for cloned projects)
+2. Local directory name (for local-only projects)
+
+## Safety Mechanisms
+
+**Directory Traversal Prevention**
+All paths are validated to ensure they resolve within the Git repository,
+preventing classic "../../../etc/passwd" style attacks or accidental operations
+outside project boundaries.
+
+**Existence Validation**
+Optional validation ensures operations only target existing files when required,
+preventing errors from typos or incorrect paths.
+
+## Implementation Philosophy
+
+The module prioritizes safety without sacrificing usability:
+- Clear error messages guide users to correct usage
+- Git integration provides natural, familiar boundaries
+- Path validation is transparent to valid operations
+- Security checks don't impede normal workflow
+
+This approach transforms potentially dangerous file operations into safe,
+predictable actions within well-defined project boundaries.
 """
 
 import subprocess
