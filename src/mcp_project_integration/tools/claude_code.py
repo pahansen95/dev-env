@@ -8,7 +8,8 @@ from typing import Dict, List
 import logging
 
 from ..server import mcp
-from ..core import Session, Task, GitOperations, document_tool
+from ..core import Session, GitOperations, document_tool
+from .claude_code_enhanced import run_task_enhanced, session_info_enhanced, list_sessions_enhanced
 
 logger = logging.getLogger(__name__)
 
@@ -256,29 +257,8 @@ def run_task(session_id: str, intent: str) -> Dict:
 
   Example: run_task(session_id, "Add input validation to the login form")
   """
-  # Load session
-  try:
-    session = Session.load(session_id)
-  except FileNotFoundError:
-    return {"error": f"Session {session_id} not found"}
-
-  # Create and execute task
-  task = Task(intent, session_id)
-  success = task.execute()
-
-  # Save task to session
-  session.add_task(task)
-
-  logger.info(f"Task {task.id} {'succeeded' if success else 'failed'}")
-
-  return {
-    "task_id": task.id,
-    "success": success,
-    "intent": intent,
-    "before_commit": task.before_commit[:8],
-    "after_commit": task.after_commit[:8] if task.after_commit else None,
-    "changes_made": task.after_commit != task.before_commit,
-  }
+  # Use the enhanced implementation
+  return run_task_enhanced(session_id, intent)
 
 
 @document_tool(
@@ -348,25 +328,8 @@ def list_sessions() -> List[Dict]:
   - Most recent sessions first
   - Age displayed as "X days/hours/minutes ago"
   """
-  sessions = Session.list_all()
-
-  # Add relative time information
-  from datetime import datetime
-
-  now = datetime.now()
-
-  for session in sessions:
-    created = session["created_at"]
-    delta = now - created
-
-    if delta.days > 0:
-      session["age"] = f"{delta.days} days ago"
-    elif delta.seconds > 3600:
-      session["age"] = f"{delta.seconds // 3600} hours ago"
-    else:
-      session["age"] = f"{delta.seconds // 60} minutes ago"
-
-  return sessions
+  # Use the enhanced implementation
+  return list_sessions_enhanced()
 
 
 @document_tool(
@@ -456,35 +419,8 @@ def session_info(session_id: str) -> Dict:
 
   Error: Returns {"error": "message"} if session not found
   """
-  try:
-    session = Session.load(session_id)
-  except FileNotFoundError:
-    return {"error": f"Session {session_id} not found"}
-
-  # Calculate session statistics
-  successful_tasks = sum(1 for task in session.tasks if task.get("success"))
-  total_tasks = len(session.tasks)
-
-  return {
-    "id": session.id,
-    "goal": session.goal,
-    "created_at": session.created_at.isoformat(),
-    "start_commit": session.start_commit[:8],
-    "task_count": total_tasks,
-    "success_rate": f"{(successful_tasks / total_tasks * 100):.0f}%" if total_tasks > 0 else "N/A",
-    "tasks": [
-      {
-        "intent": task["intent"],
-        "success": task["success"],
-        "created_at": task["created_at"].isoformat(),
-        "commits": {
-          "before": task["before_commit"][:8],
-          "after": task["after_commit"][:8] if task["after_commit"] else None,
-        },
-      }
-      for task in session.tasks
-    ],
-  }
+  # Use the enhanced implementation
+  return session_info_enhanced(session_id)
 
 
 @document_tool(

@@ -173,9 +173,10 @@ pattern discovery and cross-session learning mechanisms.
 """
 
 import uuid
+import json
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import logging
 
 from .serialization import PythonConfigSerializer
@@ -184,12 +185,117 @@ from .utils import GitOperations, SubprocessRunner
 logger = logging.getLogger(__name__)
 
 
-class Task:
-  """Represents a single Claude Code execution
+class ClaudeCodeOutput:
+  """Parses and stores Claude Code's structured output"""
 
-  Tasks capture the intent, Git state changes, and execution results
-  for bounded development operations within a session.
-  """
+  def __init__(self, raw_output: str):
+    self.raw_output = raw_output
+    self.messages: List[Dict[str, Any]] = []
+    self.session_id: Optional[str] = None
+    self.tools_available: List[str] = []
+    self.total_cost: Optional[float] = None
+    self.duration_ms: Optional[int] = None
+    self.num_turns: Optional[int] = None
+    self.final_result: Optional[str] = None
+    self.error: Optional[str] = None
+    self._parse()
+
+  def _parse(self):
+    """Parse JSON lines from Claude Code output"""
+    lines = self.raw_output.strip().split("\n")
+
+    for line in lines:
+      if not line.strip():
+        continue
+
+      try:
+        msg = json.loads(line)
+        self.messages.append(msg)
+
+        # Extract key information based on message type
+        msg_type = msg.get("type")
+
+        if msg_type == "system" and msg.get("subtype") == "init":
+          self.session_id = msg.get("session_id")
+          self.tools_available = msg.get("tools", [])
+
+        elif msg_type == "result":
+          result_data = msg
+          self.total_cost = result_data.get("cost_usd")
+          self.duration_ms = result_data.get("duration_ms")
+          self.num_turns = result_data.get("num_turns")
+          self.final_result = result_data.get("result")
+          self.error = result_data.get("error")
+
+      except json.JSONDecodeError as e:
+        logger.warning(f"Failed to parse JSON line: {line[:100]}... Error: {e}")
+        continue
+
+  def get_tool_usage(self) -> List[Dict[str, Any]]:
+    """Extract tool usage from messages"""
+    tool_usage = []
+
+    for msg in self.messages:
+      if msg.get("type") == "assistant":
+        content = msg.get("message", {}).get("content", [])
+        for item in content:
+          if item.get("type") == "tool_use":
+            tool_usage.append({"id": item.get("id"), "name": item.get("name"), "input": item.get("input", {})})
+
+    return tool_usage
+
+  def get_conversation_flow(self) -> List[Dict[str, Any]]:
+    """Extract simplified conversation flow"""
+    flow = []
+
+    for msg in self.messages:
+      msg_type = msg.get("type")
+
+      if msg_type == "assistant":
+        content = msg.get("message", {}).get("content", [])
+        for item in content:
+          if item.get("type") == "text":
+            flow.append({"role": "assistant", "type": "text", "content": item.get("text", "")})
+          elif item.get("type") == "tool_use":
+            flow.append(
+              {"role": "assistant", "type": "tool_use", "tool": item.get("name"), "input": item.get("input", {})}
+            )
+
+      elif msg_type == "user":
+        content = msg.get("message", {}).get("content", [])
+        for item in content:
+          if item.get("type") == "tool_result":
+            flow.append(
+              {
+                "role": "user",
+                "type": "tool_result",
+                "tool_id": item.get("tool_use_id"),
+                "content": item.get("content", "")[:200] + "..."
+                if len(item.get("content", "")) > 200
+                else item.get("content", ""),
+              }
+            )
+
+    return flow
+
+  def to_dict(self) -> Dict[str, Any]:
+    """Convert to dictionary for storage"""
+    return {
+      "session_id": self.session_id,
+      "tools_available": self.tools_available,
+      "total_cost": self.total_cost,
+      "duration_ms": self.duration_ms,
+      "num_turns": self.num_turns,
+      "final_result": self.final_result,
+      "error": self.error,
+      "tool_usage": self.get_tool_usage(),
+      "conversation_flow": self.get_conversation_flow(),
+      "message_count": len(self.messages),
+    }
+
+
+class Task:
+  """Enhanced Task with verbose Claude Code output capture"""
 
   def __init__(self, intent: str, session_id: str):
     self.id = str(uuid.uuid4())
@@ -199,51 +305,51 @@ class Task:
     self.before_commit = GitOperations.get_current_commit()
     self.after_commit: Optional[str] = None
     self.success: Optional[bool] = None
-    self.output: Optional[str] = None
+    self.raw_output: Optional[str] = None
+    self.parsed_output: Optional[ClaudeCodeOutput] = None
+    self.execution_metadata: Dict[str, Any] = {}
 
   def execute(self) -> bool:
-    """Execute Claude Code with the task intent
-
-    Manages Git state, runs Claude Code subprocess, and commits
-    successful changes. Returns execution success status.
-    """
+    """Execute Claude Code with verbose output capture"""
     # Log task execution start
     logger.info(f"Starting task execution: {self.id}")
     logger.info(f"Intent: {self.intent}")
     logger.debug(f"Session: {self.session_id}")
     logger.debug(f"Git state before: {self.before_commit[:8]}")
 
+    # Track execution timing
+    execution_start = datetime.now()
+
     # Ensure clean working directory
     stash_ref = None
     if not GitOperations.is_clean():
-      # Parse git status to get file counts
+      # Get detailed status
       try:
         status_output = GitOperations.get_output(["status", "--porcelain=v1"])
-        modified_count = 0
-        untracked_count = 0
-
-        for line in status_output.splitlines():
-          if line:
-            status_code = line[:2]
-            if status_code[1] in "MD":  # Modified or Deleted in working tree
-              modified_count += 1
-            elif status_code == "??":  # Untracked
-              untracked_count += 1
-
-        logger.info(f"Working directory not clean - {modified_count} modified, {untracked_count} untracked files")
+        changes = self._parse_git_status(status_output)
+        logger.info(f"Working directory not clean - {changes['summary']}")
+        self.execution_metadata["pre_execution_changes"] = changes
       except Exception as e:
         logger.warning(f"Could not parse git status: {e}")
-        logger.info("Working directory not clean - stashing changes")
+
       logger.info(f"Stashing changes for task {self.id}")
       stash_ref = GitOperations.stash(f"Task {self.id}")
 
     try:
-      # Execute Claude Code
+      # Execute Claude Code with verbose output
       logger.info(f"Executing Claude Code with intent: {self.intent[:100]}{'...' if len(self.intent) > 100 else ''}")
 
-      # Build command
-      command = ["claude", "--print", self.intent]
-      logger.debug(f"Command: {' '.join(command[:3])}... (intent length: {len(self.intent)} chars)")
+      # Build command with verbose output flags
+      command = [
+        "claude",
+        "--verbose",  # Enable verbose output
+        "--print",  # Print results
+        "--output-format",
+        "stream-json",  # Structured JSON output
+        self.intent,
+      ]
+
+      logger.debug(f"Command: {' '.join(command[:7])}... (intent length: {len(self.intent)} chars)")
 
       # Log execution environment
       import os
@@ -251,91 +357,105 @@ class Task:
       logger.debug(f"Working directory: {os.getcwd()}")
       logger.debug(f"Python environment: {os.environ.get('VIRTUAL_ENV', 'No venv active')}")
 
-      start_time = datetime.now()
+      # Execute with progress logging
+      logger.info("Starting Claude Code subprocess (timeout: 15 minutes)...")
+
       try:
-        # Execute with progress logging
-        logger.info("Starting Claude Code subprocess (timeout: 15 minutes)...")
         result = SubprocessRunner.run(
           command=command,
-          timeout=900,  # 15m
+          timeout=900,  # 15 minutes
           check=False,
-          capture_output=True,  # Ensure we capture both stdout and stderr
+          capture_output=True,
         )
 
-        elapsed = (datetime.now() - start_time).total_seconds()
-        logger.info(f"Claude Code execution completed in {elapsed:.1f} seconds")
+        execution_time = (datetime.now() - execution_start).total_seconds()
+        logger.info(f"Claude Code execution completed in {execution_time:.1f} seconds")
+        self.execution_metadata["execution_time_seconds"] = execution_time
 
-      except TimeoutError as e:
-        elapsed = (datetime.now() - start_time).total_seconds()
-        logger.error(f"Claude Code execution timed out after {elapsed:.1f} seconds")
-        logger.error(f"Timeout details: {str(e)}")
+      except TimeoutError:
+        execution_time = (datetime.now() - execution_start).total_seconds()
+        logger.error(f"Claude Code execution timed out after {execution_time:.1f} seconds")
+        self.execution_metadata["timeout"] = True
+        self.execution_metadata["execution_time_seconds"] = execution_time
         raise RuntimeError(
-          f"Task timed out after {elapsed:.1f}s. Consider breaking down the intent into smaller steps."
+          f"Task timed out after {execution_time:.1f}s. Consider breaking down the intent into smaller steps."
         )
 
       except Exception as e:
-        elapsed = (datetime.now() - start_time).total_seconds()
-        logger.error(f"Claude Code execution failed after {elapsed:.1f} seconds")
+        execution_time = (datetime.now() - execution_start).total_seconds()
+        logger.error(f"Claude Code execution failed after {execution_time:.1f} seconds")
         logger.error(f"Error type: {type(e).__name__}")
         logger.error(f"Error details: {str(e)}")
+        self.execution_metadata["execution_error"] = f"{type(e).__name__}: {str(e)}"
+        self.execution_metadata["execution_time_seconds"] = execution_time
         raise RuntimeError(f"Failed to execute Claude Code: {type(e).__name__}: {str(e)}")
 
-      # Process results
-      self.output = result.stdout
+      # Store raw output
+      self.raw_output = result.stdout
       self.success = result.success
 
-      # Log execution results
-      logger.info(f"Claude Code exit status: {'SUCCESS' if self.success else 'FAILURE'}")
-      if result.stderr:
-        logger.warning(f"Claude Code stderr output: {result.stderr[:500]}{'...' if len(result.stderr) > 500 else ''}")
+      # Parse structured output
+      if self.raw_output:
+        logger.debug(f"Parsing Claude Code output ({len(self.raw_output)} chars)")
+        self.parsed_output = ClaudeCodeOutput(self.raw_output)
 
-      if self.output:
-        output_lines = self.output.strip().split("\n")
-        logger.debug(f"Claude Code output ({len(output_lines)} lines, {len(self.output)} chars total)")
-        if len(output_lines) <= 10:
-          logger.debug(f"Output:\n{self.output}")
-        else:
-          logger.debug(f"Output (first 5 lines):\n{chr(10).join(output_lines[:5])}")
-          logger.debug(f"... ({len(output_lines) - 10} lines omitted) ...")
-          logger.debug(f"Output (last 5 lines):\n{chr(10).join(output_lines[-5:])}")
+        # Log parsed information
+        if self.parsed_output.session_id:
+          logger.info(f"Claude Code session ID: {self.parsed_output.session_id}")
+        if self.parsed_output.tools_available:
+          logger.debug(
+            f"Available tools: {', '.join(self.parsed_output.tools_available[:5])}{'...' if len(self.parsed_output.tools_available) > 5 else ''}"
+          )
+        if self.parsed_output.total_cost is not None:
+          logger.info(f"Execution cost: ${self.parsed_output.total_cost:.6f}")
+        if self.parsed_output.duration_ms is not None:
+          logger.info(f"Claude API duration: {self.parsed_output.duration_ms}ms")
+        if self.parsed_output.num_turns is not None:
+          logger.info(f"Conversation turns: {self.parsed_output.num_turns}")
+
+        # Log tool usage
+        tool_usage = self.parsed_output.get_tool_usage()
+        if tool_usage:
+          logger.info(f"Tools used: {len(tool_usage)} invocations")
+          for tool in tool_usage[:3]:  # Log first 3
+            logger.debug(f"  - {tool['name']}: {str(tool['input'])[:100]}")
+          if len(tool_usage) > 3:
+            logger.debug(f"  ... and {len(tool_usage) - 3} more tool invocations")
+
+        # Store metadata
+        self.execution_metadata.update(self.parsed_output.to_dict())
+
       else:
         logger.warning("Claude Code produced no output")
+
+      # Log stderr if present
+      if result.stderr:
+        logger.warning(f"Claude Code stderr output: {result.stderr[:500]}{'...' if len(result.stderr) > 500 else ''}")
+        self.execution_metadata["stderr"] = result.stderr
 
       # Check for changes and commit if successful
       if self.success:
         if not GitOperations.is_clean():
-          # Get detailed change information by parsing git status
-          try:
-            status_output = GitOperations.get_output(["status", "--porcelain=v1"])
-            change_count = 0
-            change_types = {"staged": 0, "modified": 0, "untracked": 0}
+          # Get detailed change information
+          status_output = GitOperations.get_output(["status", "--porcelain=v1"])
+          changes = self._parse_git_status(status_output)
+          logger.info(f"Detected changes after execution: {changes['summary']}")
+          self.execution_metadata["post_execution_changes"] = changes
 
-            for line in status_output.splitlines():
-              if line:
-                change_count += 1
-                status_code = line[:2]
-                if status_code[0] in "AMD":  # Staged changes
-                  change_types["staged"] += 1
-                if status_code[1] in "MD":  # Modified in working tree
-                  change_types["modified"] += 1
-                elif status_code == "??":  # Untracked
-                  change_types["untracked"] += 1
-
-            change_summary = ", ".join([f"{count} {type}" for type, count in change_types.items() if count > 0])
-            logger.debug(f"Change breakdown: {change_summary}")
-
-          except Exception as e:
-            logger.warning(f"Could not parse git status for details: {e}")
-            change_count = 1  # At least one change since not clean
-
-          logger.info(f"Detected {change_count} file changes after task execution")
+          # Get diff summary
+          diff_stats = GitOperations.get_output(["diff", "--stat"])
+          if diff_stats:
+            logger.debug("Change statistics:")
+            for line in diff_stats.split("\n")[:10]:  # First 10 lines
+              if line.strip():
+                logger.debug(f"  {line}")
 
           # Stage and commit
           GitOperations.stage_all()
           logger.info("Staged all changes")
 
           commit_msg = f"Task: {self.intent[:50]}{'...' if len(self.intent) > 50 else ''}"
-          commit_body = f"task_id: {self.id}\nsession_id: {self.session_id}\n\nIntent:\n{self.intent}"
+          commit_body = self._build_commit_body()
 
           self.after_commit = GitOperations.commit(commit_msg, body=commit_body)
           logger.info(f"Created commit {self.after_commit[:8]}: {commit_msg}")
@@ -346,38 +466,28 @@ class Task:
         logger.warning("Task failed - no changes will be committed")
         self.after_commit = self.before_commit
 
-        # Try to extract error information from output
-        if self.output and "error" in self.output.lower():
-          error_lines = [line for line in self.output.split("\n") if "error" in line.lower()]
-          if error_lines:
-            logger.error(f"Error indicators in output: {error_lines[:3]}")
+        # Extract error information from parsed output
+        if self.parsed_output and self.parsed_output.error:
+          logger.error(f"Claude Code reported error: {self.parsed_output.error}")
 
     except Exception as e:
       logger.error(f"Task execution failed with exception: {type(e).__name__}")
       logger.error(f"Exception details: {str(e)}")
 
-      # Add more context to the error
       import traceback
 
       logger.debug(f"Full traceback:\n{traceback.format_exc()}")
 
       self.success = False
-      self.output = f"Error: {type(e).__name__}: {str(e)}"
+      self.execution_metadata["exception"] = f"{type(e).__name__}: {str(e)}"
 
-      # Try to capture any partial work
+      # Check for partial work
       if not GitOperations.is_clean():
         try:
-          status_output = GitOperations.get_output(["status", "--porcelain=v1", "--untracked-files=normal"])
-          change_lines = [line for line in status_output.splitlines() if line.strip()]
-          if change_lines:
-            logger.warning(f"Partial changes detected: {len(change_lines)} files affected")
-            # Log first few files for context
-            for line in change_lines[:5]:
-              file_path = line[3:]
-              status = line[:2]
-              logger.debug(f"  {status} {file_path}")
-            if len(change_lines) > 5:
-              logger.debug(f"  ... and {len(change_lines) - 5} more files")
+          status_output = GitOperations.get_output(["status", "--porcelain=v1"])
+          changes = self._parse_git_status(status_output)
+          logger.warning(f"Partial changes detected: {changes['summary']}")
+          self.execution_metadata["partial_changes"] = changes
         except Exception as e:
           logger.warning(f"Could not analyze partial changes: {e}")
 
@@ -391,23 +501,108 @@ class Task:
           logger.error(f"Failed to restore stash: {type(e).__name__}: {e}")
           logger.error("Manual stash recovery may be needed")
           logger.error(f"Stash reference: {stash_ref}")
+          self.execution_metadata["stash_restore_failed"] = True
 
       # Final status log
-      logger.info(f"Task {self.id} completed: {'SUCCESS' if self.success else 'FAILURE'}")
+      execution_time = (datetime.now() - execution_start).total_seconds()
+      logger.info(f"Task {self.id} completed in {execution_time:.1f}s: {'SUCCESS' if self.success else 'FAILURE'}")
       logger.debug(f"Final git state: {GitOperations.get_current_commit()[:8]}")
 
     return self.success
 
+  def _parse_git_status(self, status_output: str) -> Dict[str, Any]:
+    """Parse git status output into structured format"""
+    changes = {"staged": [], "modified": [], "untracked": [], "deleted": [], "total": 0}
+
+    for line in status_output.splitlines():
+      if not line:
+        continue
+
+      status_code = line[:2]
+      file_path = line[3:]
+      changes["total"] += 1
+
+      if status_code[0] in "AMD":  # Staged changes
+        changes["staged"].append(file_path)
+      if status_code[1] == "M":  # Modified in working tree
+        changes["modified"].append(file_path)
+      elif status_code[1] == "D":  # Deleted in working tree
+        changes["deleted"].append(file_path)
+      elif status_code == "??":  # Untracked
+        changes["untracked"].append(file_path)
+
+    # Build summary
+    summary_parts = []
+    if changes["staged"]:
+      summary_parts.append(f"{len(changes['staged'])} staged")
+    if changes["modified"]:
+      summary_parts.append(f"{len(changes['modified'])} modified")
+    if changes["untracked"]:
+      summary_parts.append(f"{len(changes['untracked'])} untracked")
+    if changes["deleted"]:
+      summary_parts.append(f"{len(changes['deleted'])} deleted")
+
+    changes["summary"] = ", ".join(summary_parts) if summary_parts else "no changes"
+
+    return changes
+
+  def _build_commit_body(self) -> str:
+    """Build detailed commit message body"""
+    body_parts = [f"task_id: {self.id}", f"session_id: {self.session_id}", "", "Intent:", self.intent, ""]
+
+    # Add execution metadata
+    if self.parsed_output:
+      body_parts.extend(
+        [
+          "Execution Details:",
+          f"- Claude session: {self.parsed_output.session_id or 'N/A'}",
+          f"- Cost: ${self.parsed_output.total_cost:.6f}" if self.parsed_output.total_cost else "- Cost: N/A",
+          f"- Duration: {self.parsed_output.duration_ms}ms" if self.parsed_output.duration_ms else "- Duration: N/A",
+          f"- Turns: {self.parsed_output.num_turns}" if self.parsed_output.num_turns else "- Turns: N/A",
+          "",
+        ]
+      )
+
+      # Add tool usage summary
+      tool_usage = self.parsed_output.get_tool_usage()
+      if tool_usage:
+        body_parts.append("Tools Used:")
+        tool_counts = {}
+        for tool in tool_usage:
+          tool_name = tool["name"]
+          tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
+
+        for tool_name, count in sorted(tool_counts.items()):
+          body_parts.append(f"- {tool_name}: {count}x")
+        body_parts.append("")
+
+    return "\n".join(body_parts)
+
   def to_dict(self) -> Dict:
-    """Convert task to dictionary for persistence"""
-    return {
+    """Convert task to dictionary for persistence with verbose output"""
+    base_dict = {
       "id": self.id,
       "intent": self.intent,
       "created_at": self.created_at,
       "before_commit": self.before_commit,
       "after_commit": self.after_commit,
       "success": self.success,
+      "execution_metadata": self.execution_metadata,
     }
+
+    # Add parsed output summary
+    if self.parsed_output:
+      base_dict["claude_output"] = {
+        "session_id": self.parsed_output.session_id,
+        "cost_usd": self.parsed_output.total_cost,
+        "duration_ms": self.parsed_output.duration_ms,
+        "num_turns": self.parsed_output.num_turns,
+        "tool_count": len(self.parsed_output.get_tool_usage()),
+        "final_result": self.parsed_output.final_result[:500] if self.parsed_output.final_result else None,
+        "error": self.parsed_output.error,
+      }
+
+    return base_dict
 
 
 class Session:
