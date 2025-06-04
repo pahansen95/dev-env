@@ -11,9 +11,38 @@ from ..core import find_git_root, get_git_project_name, GitOperations
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def status() -> dict:
-  """Get project health status and basic information"""
+  """Get project health status and basic information.
+
+  Provides comprehensive project context including Git state, Python environment,
+  and project structure. This is typically the first tool to call when establishing
+  project context.
+
+  Use when:
+  - Starting a new development session
+  - Verifying project configuration
+  - Checking for uncommitted changes
+  - Understanding project structure
+
+  Returns:
+      Dictionary containing:
+      - health: Overall status ("ok", "warning", "error")
+      - timestamp: ISO 8601 UTC timestamp
+      - project: Name, root path, and existence check
+      - git: Branch, commit hash, cleanliness, change count
+      - environment: Python version, venv status
+      - structure: README/src existence, Python file count
+      - errors: List of non-fatal issues encountered
+
+  Common patterns:
+  - health="ok" with clean=false: Working directory has uncommitted changes
+  - health="warning": Non-fatal errors detected (check errors list)
+  - health="error": Not in a Git repository or critical failure
+
+  Example response:
+  {"health": "ok", "git": {"branch": "main", "clean": true}, ...}
+  """
   logger.info("status tool called")
 
   status_info = {"health": "ok", "timestamp": datetime.utcnow().isoformat() + "Z", "errors": []}

@@ -214,7 +214,14 @@ class ContextMatcher:
     return line.rstrip()
 
 
-@mcp.tool()
+@mcp.tool(
+  annotations={
+    "readOnlyHint": False,
+    "destructiveHint": False,  # Creates backup first
+    "idempotentHint": False,
+    "openWorldHint": False,
+  }
+)
 def apply_patch(file_path: str, patch: str) -> dict:
   """Apply a unified diff patch to a file using difflib
 
@@ -224,6 +231,60 @@ def apply_patch(file_path: str, patch: str) -> dict:
 
   Returns:
       dict with status, backup_path, and any errors
+
+  Use when:
+  - Applying code review suggestions
+  - Implementing incremental changes
+  - Testing modifications safely
+  - Programmatically editing files
+
+  Patch format:
+  Standard unified diff format with:
+  - --- original/file.py
+  - +++ modified/file.py
+  - @@ -start,count +start,count @@ headers
+  - Lines starting with - (removed)
+  - Lines starting with + (added)
+  - Lines starting with space (context)
+
+  Features:
+  - Sophisticated fuzzy matching (85% similarity threshold)
+  - Automatic backup creation before modification
+  - Python/JSON syntax validation after patching
+  - Multi-hunk support with independent matching
+  - Searches ±10 lines for displaced content
+
+  Return format:
+  Success:
+  {
+    "status": "success",
+    "backup_path": "relative/path/to/backup",
+    "lines_changed": 42,
+    "hunks_applied": 3,
+    "syntax_validation": {"valid": true, "status": "valid"}
+  }
+
+  Error:
+  {
+    "status": "error",
+    "error": "Failed to find context...",
+    "failed_hunk": 23  # Line number of failed hunk
+  }
+
+  Safety features:
+  - Always creates timestamped backup
+  - Validates file exists before patching
+  - Restores original on any error
+  - Reports syntax errors after patching
+
+  Example patch:
+  ```
+  --- a/config.py
+  +++ b/config.py
+  @@ -10,3 +10,3 @@
+  -DEBUG = False
+  +DEBUG = True
+  ```
   """
   logger.info(f"apply_patch called for {file_path}")
 

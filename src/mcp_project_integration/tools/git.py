@@ -9,9 +9,34 @@ from ..core import GitOperations
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def git_status() -> dict:
-  """Get detailed git repository status"""
+  """Get detailed git repository status.
+
+  Provides comprehensive view of repository state including current branch,
+  commit, and working directory changes. Parses git status into structured data.
+
+  Returns:
+      Dictionary containing:
+      - branch: Current branch name or "HEAD" if detached
+      - commit: Short commit hash (8 chars)
+      - detached: Boolean indicating detached HEAD state
+      - staged: List of files staged for commit
+      - modified: List of modified files in working tree
+      - untracked: List of untracked files
+      - clean: Boolean indicating no changes
+
+  Use when:
+  - Checking for uncommitted changes before operations
+  - Understanding current repository state
+  - Preparing commit messages
+  - Validating clean working directory
+
+  Error handling:
+  - Returns {"error": "message"} if not in git repository
+  - Handles detached HEAD states gracefully
+  - Works with empty repositories
+  """
   logger.info("git_status called")
 
   try:
@@ -71,7 +96,14 @@ def git_status() -> dict:
     return {"error": str(e)}
 
 
-@mcp.tool()
+@mcp.tool(
+  annotations={
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,  # Creates new commits
+    "openWorldHint": False,
+  }
+)
 def git_commit(message: str, files: list[str] = None) -> dict:
   """Create a git commit
 
@@ -81,6 +113,29 @@ def git_commit(message: str, files: list[str] = None) -> dict:
 
   Returns:
       Dict with status, commit hash, and message or error details
+
+  Use when:
+  - Saving work progress
+  - Creating restore points
+  - Documenting completed changes
+  - Before risky operations
+
+  Behavior:
+  - Stages specified files before committing
+  - Commits all staged changes if no files specified
+  - Requires at least one staged change
+  - Uses current user's git configuration
+
+  Side effects:
+  - Creates permanent commit in git history
+  - Updates HEAD and current branch
+  - Triggers any configured git hooks
+
+  Return format:
+  - Success: {"status": "success", "commit": "abc12345", "message": "..."}
+  - Error: {"status": "error", "error": "No changes staged for commit"}
+
+  Example: git_commit("Add user authentication", ["auth.py", "tests/test_auth.py"])
   """
   logger.info(f"git_commit called with message: {message}")
 
@@ -110,7 +165,7 @@ def git_commit(message: str, files: list[str] = None) -> dict:
     return {"status": "error", "error": error_msg}
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def git_log(max_count: int = 10) -> list[dict]:
   """Get git commit history
 
@@ -119,6 +174,25 @@ def git_log(max_count: int = 10) -> list[dict]:
 
   Returns:
       List of commit dictionaries or error dict
+
+  Commit format:
+      - hash: Full commit SHA
+      - short_hash: Abbreviated commit SHA
+      - author: Author name
+      - email: Author email
+      - date: ISO format timestamp
+      - message: Commit message
+
+  Use when:
+  - Reviewing recent changes
+  - Finding specific commits
+  - Understanding project history
+  - Generating changelogs
+
+  Constraints:
+  - max_count limited to 1-1000
+  - Returns empty list for new repositories
+  - Ordered by recency (newest first)
   """
   logger.info(f"git_log called with max_count={max_count}")
 
@@ -165,7 +239,7 @@ def git_log(max_count: int = 10) -> list[dict]:
     return [{"error": str(e)}]
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def git_diff(file: str = None, staged: bool = False) -> str:
   """Get git diff output
 
@@ -175,6 +249,26 @@ def git_diff(file: str = None, staged: bool = False) -> str:
 
   Returns:
       Diff output as string, or error message
+
+  Use when:
+  - Reviewing changes before commit
+  - Understanding modifications
+  - Generating patch files
+  - Validating expected changes
+
+  Output format:
+  - Unified diff format
+  - Shows added/removed lines
+  - Includes file headers
+  - Empty string if no differences
+
+  Common patterns:
+  - git_diff(): All unstaged changes
+  - git_diff(staged=True): All staged changes
+  - git_diff("file.py"): Specific file changes
+  - git_diff("file.py", staged=True): Staged changes for file
+
+  Note: File must be tracked by git
   """
   logger.info(f"git_diff called for file={file}, staged={staged}")
 

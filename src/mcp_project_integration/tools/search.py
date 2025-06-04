@@ -10,23 +10,48 @@ from ..core import get_safe_path, find_git_root
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def find(
   query: str,
   match_type: str = "glob",  # "glob", "name", "exact"
   target_type: str = "both",  # "file", "dir", "both"
   directory: str = ".",
 ) -> list[str]:
-  """Find files and directories using various matching strategies
+  """Find files and directories using various matching strategies.
+
+  Efficiently locates files and directories within the project using glob patterns,
+  name substrings, or exact matches. Results are limited to prevent memory issues.
 
   Args:
-      query: Search query (glob pattern, name substring, or exact name)
+      query: Search query pattern
+          - glob: "*.py", "src/**/*.json", "test_*.py"
+          - name: "config" matches "config.py", "myconfig.ini"
+          - exact: "README.md" matches only exact filename
       match_type: Matching strategy - "glob" (wildcards), "name" (substring), or "exact"
       target_type: What to find - "file", "dir", or "both"
       directory: Starting directory for search (default: project root)
 
   Returns:
       List of matching paths relative to project root
+      Directories end with "/" for easy identification
+
+  Use when:
+  - Discovering project structure
+  - Locating specific file types
+  - Finding configuration files
+  - Preparing for batch operations
+
+  Performance notes:
+  - Results limited to 10,000 items
+  - Large projects may hit limits
+  - Use specific patterns to narrow results
+  - Start in subdirectories when possible
+
+  Examples:
+  - Find Python files: find("*.py", match_type="glob")
+  - Find test directories: find("test", match_type="name", target_type="dir")
+  - Find specific file: find("setup.py", match_type="exact")
+  - Find in subdirectory: find("*.md", directory="docs")
   """
   logger.info(f"find called with query='{query}', match_type='{match_type}', target_type='{target_type}'")
 
@@ -132,7 +157,7 @@ def find(
   return sorted(results)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def search(
   pattern: str,
   search_type: str = "string",  # "string", "regex", "ast"
@@ -141,18 +166,65 @@ def search(
   context_lines: int = 0,
   definition_type: str = None,  # For AST searches: "function", "class", or "any"
 ) -> list[dict]:
-  """Universal search tool for finding patterns in project files
+  """Universal search tool for finding patterns in project files.
+
+  Searches file contents using string matching, regular expressions, or
+  Python AST analysis. Automatically excludes binary files.
 
   Args:
-      pattern: Search pattern (string, regex, or function/class name)
+      pattern: Search pattern
+          - string: Literal text to find
+          - regex: Regular expression pattern
+          - ast: Python function/class name
       search_type: Type of search - "string", "regex", or "ast" (for Python definitions)
       file_pattern: Glob pattern for files to search (default: all files)
       max_files: Maximum number of files to search
       context_lines: Number of context lines before/after match (for string/regex)
-      definition_type: For AST search - "function", "class", or "any" (default: "any")
+      definition_type: For AST search - "function", "class", or "any"
 
   Returns:
-      List of matches with file path, line number, and match details
+      List of match dictionaries containing:
+      - file: Relative path to file
+      - line: Line number of match
+      - match: Matched text (string/regex)
+      - full_line: Complete line containing match
+      - context: Surrounding lines if requested
+      - type/name/preview: Additional fields for AST matches
+
+  Use when:
+  - Finding code usage patterns
+  - Locating TODO/FIXME comments
+  - Searching for function definitions
+  - Analyzing code structure
+  - Finding configuration values
+
+  Search type selection:
+  - string: Fast literal matching, case-sensitive
+  - regex: Pattern matching with captures, slower
+  - ast: Find Python definitions by name
+
+  Performance optimization:
+  - Limit file_pattern to relevant files
+  - Use smaller max_files for large projects
+  - AST search automatically filters to *.py
+  - Binary files automatically excluded
+
+  Common patterns:
+  - Find TODOs: search("TODO", file_pattern="**/*.py")
+  - Find imports: search("^import", search_type="regex")
+  - Find function: search("process_data", search_type="ast")
+  - With context: search("error", context_lines=2)
+
+  Limitations:
+  - max_files capped at 1000
+  - context_lines capped at 10
+  - Binary files skipped
+  - AST only works on valid Python
+
+  Error handling:
+  - Invalid regex returns error
+  - Syntax errors in Python files skipped for AST
+  - Permission errors logged and skipped
   """
   logger.info(f"search called with pattern='{pattern}', search_type='{search_type}', file_pattern='{file_pattern}'")
 

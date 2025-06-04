@@ -13,7 +13,14 @@ from ..core import Session, Task, GitOperations
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool()
+@mcp.tool(
+  annotations={
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,  # Creates new session
+    "openWorldHint": True,  # May invoke external Claude Code
+  }
+)
 def start_session(goal: str) -> Dict:
   """Start a new coding session with specified goal
 
@@ -25,6 +32,23 @@ def start_session(goal: str) -> Dict:
 
   Returns:
       Session details including ID and starting Git state
+
+  Use when:
+  - Beginning focused development work
+  - Starting feature implementation
+  - Initiating refactoring efforts
+  - Creating experimental branches
+
+  Session properties:
+  - Persistent across multiple tasks
+  - Tracks cumulative Git changes
+  - Maintains context between operations
+  - Enables incremental progress
+
+  Return format:
+  {"session_id": "uuid", "goal": "...", "start_commit": "abc12345", "created_at": "ISO 8601"}
+
+  Example: start_session("Implement user authentication with JWT tokens")
   """
   session = Session(goal)
   session.save()
@@ -39,7 +63,14 @@ def start_session(goal: str) -> Dict:
   }
 
 
-@mcp.tool()
+@mcp.tool(
+  annotations={
+    "readOnlyHint": False,
+    "destructiveHint": False,  # May modify files
+    "idempotentHint": False,
+    "openWorldHint": True,  # Executes Claude Code
+  }
+)
 def run_task(session_id: str, intent: str) -> Dict:
   """Execute a development task within a session
 
@@ -52,6 +83,36 @@ def run_task(session_id: str, intent: str) -> Dict:
 
   Returns:
       Task execution results including success status and Git commits
+
+  Use when:
+  - Implementing specific features
+  - Making targeted code changes
+  - Running development operations
+  - Building toward session goal
+
+  Task execution:
+  - Runs Claude Code with natural language intent
+  - Automatically tracks file modifications
+  - Commits successful changes
+  - Preserves session context
+
+  Intent guidelines:
+  - Be specific about desired outcome
+  - Reference files or components
+  - Include constraints or requirements
+  - Build on previous task results
+
+  Return format:
+  {
+    "task_id": "uuid",
+    "success": true/false,
+    "intent": "original intent",
+    "before_commit": "abc12345",
+    "after_commit": "def67890" or null,
+    "changes_made": true/false
+  }
+
+  Example: run_task(session_id, "Add input validation to the login form")
   """
   # Load session
   try:
@@ -78,7 +139,7 @@ def run_task(session_id: str, intent: str) -> Dict:
   }
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def list_sessions() -> List[Dict]:
   """List all coding sessions
 
@@ -87,6 +148,23 @@ def list_sessions() -> List[Dict]:
 
   Returns:
       List of session summaries sorted by recency
+
+  Session summary includes:
+  - id: Session identifier
+  - goal: Engineering objective
+  - created_at: Creation timestamp
+  - task_count: Number of tasks executed
+  - age: Human-readable time since creation
+
+  Use when:
+  - Reviewing development history
+  - Finding previous work
+  - Understanding project progress
+  - Resuming interrupted sessions
+
+  Ordering:
+  - Most recent sessions first
+  - Age displayed as "X days/hours/minutes ago"
   """
   sessions = Session.list_all()
 
@@ -109,7 +187,7 @@ def list_sessions() -> List[Dict]:
   return sessions
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def session_info(session_id: str) -> Dict:
   """Get detailed session information
 
@@ -121,6 +199,30 @@ def session_info(session_id: str) -> Dict:
 
   Returns:
       Full session details with task history
+
+  Information includes:
+  - Session metadata (id, goal, timestamps)
+  - Task statistics (count, success rate)
+  - Detailed task history with:
+    - Intent descriptions
+    - Success/failure status
+    - Git commit transitions
+    - Execution timestamps
+
+  Use when:
+  - Reviewing session progress
+  - Understanding task outcomes
+  - Debugging failed operations
+  - Planning next steps
+
+  Task history format:
+  Each task shows:
+  - Natural language intent
+  - Execution result
+  - Before/after commit hashes
+  - Timestamp of execution
+
+  Error: Returns {"error": "message"} if session not found
   """
   try:
     session = Session.load(session_id)
@@ -153,15 +255,36 @@ def session_info(session_id: str) -> Dict:
   }
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def git_status() -> Dict:
   """Get current Git repository status
 
   Returns current branch, commit, and working directory state
-  to help understand the repository context.
+  optimized for Claude Code session context.
 
   Returns:
       Git status information
+
+  Provides:
+  - branch: Current Git branch
+  - commit: Short commit hash (8 chars)
+  - clean: Whether working directory is clean
+  - changes: Breakdown of uncommitted changes
+
+  Change categories:
+  - modified: Changed tracked files
+  - added: New or untracked files
+  - deleted: Removed files
+  - total: Sum of all changes
+
+  Use when:
+  - Checking repository state before session
+  - Verifying clean working directory
+  - Understanding pending changes
+  - Confirming task results
+
+  Note: This is a simplified status focused on Claude Code workflows.
+  For detailed Git information, use the git_status tool from git module.
   """
   try:
     # Get basic status
