@@ -120,7 +120,7 @@ class ClaudeCodeExecutor:
       cmd.append("--non-interactive")
 
     # Prepare prompt with context
-    prompt = self._build_prompt(intent, context)
+    _prompt = self._build_prompt(intent, context)
 
     logger.info(f"Executing Claude Code with intent: {intent[:100]}...")
 
