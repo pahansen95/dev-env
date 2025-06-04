@@ -9,7 +9,13 @@ from ..core import GitOperations
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+TOOL_PREFIX = "git"
+
+
+@mcp.tool(
+  name=f"{TOOL_PREFIX}_status",
+  annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+)
 def git_status() -> dict:
   """Get detailed git repository status.
 
@@ -97,12 +103,13 @@ def git_status() -> dict:
 
 
 @mcp.tool(
+  name=f"{TOOL_PREFIX}_commit",
   annotations={
     "readOnlyHint": False,
     "destructiveHint": False,
     "idempotentHint": False,  # Creates new commits
     "openWorldHint": False,
-  }
+  },
 )
 def git_commit(message: str, files: list[str] = None) -> dict:
   """Create a git commit
@@ -165,7 +172,10 @@ def git_commit(message: str, files: list[str] = None) -> dict:
     return {"status": "error", "error": error_msg}
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+@mcp.tool(
+  name=f"{TOOL_PREFIX}_log",
+  annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+)
 def git_log(max_count: int = 10) -> list[dict]:
   """Get git commit history
 
@@ -239,7 +249,10 @@ def git_log(max_count: int = 10) -> list[dict]:
     return [{"error": str(e)}]
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+@mcp.tool(
+  name=f"{TOOL_PREFIX}_diff",
+  annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+)
 def git_diff(file: str = None, staged: bool = False) -> str:
   """Get git diff output
 

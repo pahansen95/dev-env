@@ -10,7 +10,13 @@ from ..core import get_safe_path, find_git_root
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+TOOL_PREFIX = "search"
+
+
+@mcp.tool(
+  name=f"{TOOL_PREFIX}_files",
+  annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+)
 def find(
   query: str,
   match_type: str = "glob",  # "glob", "name", "exact"
@@ -157,7 +163,10 @@ def find(
   return sorted(results)
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+@mcp.tool(
+  name=f"{TOOL_PREFIX}_content",
+  annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+)
 def search(
   pattern: str,
   search_type: str = "string",  # "string", "regex", "ast"

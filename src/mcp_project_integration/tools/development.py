@@ -13,6 +13,8 @@ from ..core import get_safe_path, find_git_root
 
 logger = logging.getLogger(__name__)
 
+TOOL_PREFIX = "patch"
+
 
 def validate_syntax(file_path: Path) -> dict:
   """Validate file syntax based on extension
@@ -215,12 +217,13 @@ class ContextMatcher:
 
 
 @mcp.tool(
+  name=f"{TOOL_PREFIX}_apply",
   annotations={
     "readOnlyHint": False,
     "destructiveHint": False,  # Creates backup first
     "idempotentHint": False,
     "openWorldHint": False,
-  }
+  },
 )
 def apply_patch(file_path: str, patch: str) -> dict:
   """Apply a unified diff patch to a file using difflib

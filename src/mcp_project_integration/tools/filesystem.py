@@ -9,7 +9,12 @@ from ..core import get_safe_path, find_git_root
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
+TOOL_PREFIX = "file"
+
+
+@mcp.tool(
+  name=f"{TOOL_PREFIX}_read", annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
+)
 def read_file(path: str) -> str:
   """Read a file from the project
 
@@ -57,12 +62,13 @@ def read_file(path: str) -> str:
 
 
 @mcp.tool(
+  name=f"{TOOL_PREFIX}_write",
   annotations={
     "readOnlyHint": False,
     "destructiveHint": False,  # Creates/overwrites but doesn't delete
     "idempotentHint": False,  # Overwrites existing content
     "openWorldHint": False,
-  }
+  },
 )
 def write_file(path: str, content: str) -> str:
   """Write content to a file in the project
@@ -121,12 +127,13 @@ def write_file(path: str, content: str) -> str:
 
 
 @mcp.tool(
+  name=f"{TOOL_PREFIX}_create_directory",
   annotations={
     "readOnlyHint": False,
     "destructiveHint": False,
     "idempotentHint": True,  # mkdir -p behavior
     "openWorldHint": False,
-  }
+  },
 )
 def create_directory(path: str) -> str:
   """Create a directory in the project
@@ -174,12 +181,13 @@ def create_directory(path: str) -> str:
 
 
 @mcp.tool(
+  name=f"{TOOL_PREFIX}_move",
   annotations={
     "readOnlyHint": False,
     "destructiveHint": True,  # Source is removed
     "idempotentHint": False,
     "openWorldHint": False,
-  }
+  },
 )
 def move_file(source: str, destination: str) -> dict:
   """Move or rename a file or directory
@@ -257,12 +265,13 @@ def move_file(source: str, destination: str) -> dict:
 
 
 @mcp.tool(
+  name=f"{TOOL_PREFIX}_delete",
   annotations={
     "readOnlyHint": False,
     "destructiveHint": True,
     "idempotentHint": True,  # Already deleted is not an error
     "openWorldHint": False,
-  }
+  },
 )
 def delete_file(path: str) -> dict:
   """Delete a file or directory
@@ -335,12 +344,13 @@ def delete_file(path: str) -> dict:
 
 
 @mcp.tool(
+  name=f"{TOOL_PREFIX}_copy",
   annotations={
     "readOnlyHint": False,
     "destructiveHint": False,  # Source remains
     "idempotentHint": False,  # Fails if destination exists
     "openWorldHint": False,
-  }
+  },
 )
 def copy_file(source: str, destination: str) -> dict:
   """Copy a file or directory

@@ -12,14 +12,17 @@ from ..core import Session, Task, GitOperations
 
 logger = logging.getLogger(__name__)
 
+TOOL_PREFIX = "session"
+
 
 @mcp.tool(
+  name=f"{TOOL_PREFIX}_start",
   annotations={
     "readOnlyHint": False,
     "destructiveHint": False,
     "idempotentHint": False,  # Creates new session
     "openWorldHint": True,  # May invoke external Claude Code
-  }
+  },
 )
 def start_session(goal: str) -> Dict:
   """Start a new coding session with specified goal
@@ -64,12 +67,13 @@ def start_session(goal: str) -> Dict:
 
 
 @mcp.tool(
+  name=f"{TOOL_PREFIX}_run_task",
   annotations={
     "readOnlyHint": False,
     "destructiveHint": False,  # May modify files
     "idempotentHint": False,
     "openWorldHint": True,  # Executes Claude Code
-  }
+  },
 )
 def run_task(session_id: str, intent: str) -> Dict:
   """Execute a development task within a session
@@ -139,7 +143,10 @@ def run_task(session_id: str, intent: str) -> Dict:
   }
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+@mcp.tool(
+  name=f"{TOOL_PREFIX}_list",
+  annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+)
 def list_sessions() -> List[Dict]:
   """List all coding sessions
 
@@ -187,7 +194,10 @@ def list_sessions() -> List[Dict]:
   return sessions
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+@mcp.tool(
+  name=f"{TOOL_PREFIX}_info",
+  annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+)
 def session_info(session_id: str) -> Dict:
   """Get detailed session information
 
@@ -255,7 +265,10 @@ def session_info(session_id: str) -> Dict:
   }
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+@mcp.tool(
+  name=f"{TOOL_PREFIX}_git_status",
+  annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+)
 def git_status() -> Dict:
   """Get current Git repository status
 

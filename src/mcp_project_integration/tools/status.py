@@ -11,7 +11,13 @@ from ..core import find_git_root, get_git_project_name, GitOperations
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+TOOL_PREFIX = "project"
+
+
+@mcp.tool(
+  name=f"{TOOL_PREFIX}_status",
+  annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+)
 def status() -> dict:
   """Get project health status and basic information.
 
