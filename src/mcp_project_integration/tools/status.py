@@ -6,7 +6,7 @@ import sys
 from datetime import datetime
 
 from ..server import mcp
-from ..core import find_git_root, get_git_project_name, GitOperations
+from ..core import find_git_root, get_git_project_name, GitOperations, document_tool
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +14,61 @@ logger = logging.getLogger(__name__)
 TOOL_PREFIX = "project"
 
 
+@document_tool(
+  name="project_status",
+  purpose="Establish project context by checking health, Git state, and environment",
+  category="Project Management",
+  operational_model="""
+  Inspects project root, Git repository state, Python environment, and basic
+  structure. Aggregates health indicators into overall status assessment.
+  """,
+  usage_scenarios=[
+    {
+      "condition": "Starting a new development session",
+      "rationale": "Establishes baseline understanding of project state",
+    },
+    {
+      "condition": "Before making commits or structural changes",
+      "rationale": "Verifies clean working directory and proper environment",
+    },
+    {
+      "condition": "Debugging environment issues",
+      "rationale": "Identifies missing dependencies or configuration problems",
+    },
+  ],
+  examples=[
+    {
+      "title": "Check project health",
+      "code": "status = project_status()",
+      "explanation": "Basic health check at session start",
+      "complexity": 1,
+    },
+    {
+      "title": "Verify clean state before commit",
+      "code": """status = project_status()
+if not status['git']['clean']:
+    print(f"Uncommitted changes: {status['git']['changes']} files")""",
+      "explanation": "Ensure working directory is clean",
+      "complexity": 2,
+    },
+  ],
+  error_scenarios=[
+    {
+      "error_type": "Not in git repository",
+      "cause": "Tool invoked outside Git-managed directory",
+      "diagnosis": "Check current working directory with 'pwd'",
+      "recovery": "Navigate to project root or initialize Git",
+      "state_impact": "Returns error status, no other operations attempted",
+    }
+  ],
+  performance={
+    "time_complexity": "O(n) with number of Python files",
+    "memory_usage": "Minimal - metadata only",
+    "concurrency": "Thread-safe",
+  },
+  see_also={"git_status": "Detailed Git repository information", "search_files": "Find specific project files"},
+  composition=["project_status → file_read → git_commit", "project_status → session_start"],
+)
 @mcp.tool(
   name=f"{TOOL_PREFIX}_status",
   annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},

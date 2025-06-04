@@ -5,7 +5,7 @@ import logging
 import re
 
 from ..server import mcp
-from ..core import get_safe_path, find_git_root
+from ..core import get_safe_path, find_git_root, document_tool
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +13,79 @@ logger = logging.getLogger(__name__)
 TOOL_PREFIX = "search"
 
 
+@document_tool(
+  name="search_files",
+  purpose="Locate files and directories using flexible pattern matching",
+  category="Search",
+  operational_model="""
+  Traverses project directory tree applying pattern matching strategies.
+  Returns paths relative to project root with directories marked by trailing slash.
+  Results capped at 10,000 items for performance.
+  """,
+  usage_scenarios=[
+    {"condition": "Discovering project structure", "rationale": "Understand file organization before operations"},
+    {
+      "condition": "Finding files by type or pattern",
+      "rationale": "Locate specific file categories for batch processing",
+    },
+    {"condition": "Verifying file existence", "rationale": "Check paths before read/write operations"},
+  ],
+  anti_patterns=[
+    {
+      "condition": "Finding file content",
+      "reason": "Only searches names, not content",
+      "alternative": "Use search_content for text within files",
+    },
+    {
+      "condition": "Searching outside project",
+      "reason": "Restricted to project boundaries",
+      "alternative": "Only search within git repository",
+    },
+  ],
+  examples=[
+    {
+      "title": "Find Python files",
+      "code": 'search_files("*.py", match_type="glob")',
+      "explanation": "List all Python files in project",
+      "complexity": 1,
+    },
+    {
+      "title": "Find test directories",
+      "code": 'search_files("test", match_type="name", target_type="dir")',
+      "explanation": "Find directories containing 'test' in name",
+      "complexity": 2,
+    },
+    {
+      "title": "Find in subdirectory",
+      "code": 'search_files("*.md", directory="docs")',
+      "explanation": "Search only within docs directory",
+      "complexity": 2,
+    },
+  ],
+  error_scenarios=[
+    {
+      "error_type": "ValueError",
+      "cause": "Invalid match_type or target_type",
+      "diagnosis": "Check parameter values",
+      "recovery": "Use 'glob', 'name', or 'exact' for match_type",
+      "state_impact": "No search performed",
+    },
+    {
+      "error_type": "Result limit exceeded",
+      "cause": "More than 10,000 matches",
+      "diagnosis": "Pattern too broad",
+      "recovery": "Use more specific pattern or subdirectory",
+      "state_impact": "Returns first 10,000 results",
+    },
+  ],
+  performance={
+    "time_complexity": "O(n) with file count",
+    "memory_usage": "Proportional to result count",
+    "concurrency": "Thread-safe",
+  },
+  see_also={"search_content": "Search within file contents", "file_read": "Read found files"},
+  composition=["search_files → file_read", "search_files → file_delete"],
+)
 @mcp.tool(
   name=f"{TOOL_PREFIX}_files",
   annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
@@ -163,6 +236,88 @@ def find(
   return sorted(results)
 
 
+@document_tool(
+  name="search_content",
+  purpose="Search text patterns within project files using string, regex, or AST analysis",
+  category="Search",
+  operational_model="""
+  Scans file contents for patterns using literal strings, regular expressions,
+  or Python AST parsing. Excludes binary files automatically. Returns matches
+  with file location and optional context.
+  """,
+  usage_scenarios=[
+    {"condition": "Finding code usage patterns", "rationale": "Locate where functions or variables are used"},
+    {"condition": "Searching for TODO/FIXME comments", "rationale": "Track technical debt and pending work"},
+    {
+      "condition": "Finding Python function/class definitions",
+      "rationale": "AST search provides accurate code structure analysis",
+    },
+  ],
+  anti_patterns=[
+    {
+      "condition": "Searching binary files",
+      "reason": "Automatically excluded, would fail on decode",
+      "alternative": "Use specialized binary analysis tools",
+    },
+    {
+      "condition": "Complex multi-line patterns",
+      "reason": "Searches line-by-line only",
+      "alternative": "Use file_read and custom parsing",
+    },
+  ],
+  examples=[
+    {
+      "title": "Find TODO comments",
+      "code": 'search_content("TODO", file_pattern="**/*.py")',
+      "explanation": "Simple string search in Python files",
+      "complexity": 1,
+    },
+    {
+      "title": "Find imports with regex",
+      "code": 'search_content("^from .+ import", search_type="regex")',
+      "explanation": "Pattern matching with regular expressions",
+      "complexity": 2,
+    },
+    {
+      "title": "Find function definition",
+      "code": 'search_content("process_data", search_type="ast", definition_type="function")',
+      "explanation": "Precise AST-based function search",
+      "complexity": 2,
+    },
+    {
+      "title": "Search with context",
+      "code": 'search_content("error", context_lines=3)',
+      "explanation": "Include surrounding lines for context",
+      "complexity": 2,
+    },
+  ],
+  error_scenarios=[
+    {
+      "error_type": "Invalid regex",
+      "cause": "Malformed regular expression",
+      "diagnosis": "Test regex pattern separately",
+      "recovery": "Fix regex syntax or use string search",
+      "state_impact": "No search performed",
+    },
+    {
+      "error_type": "SyntaxError in AST search",
+      "cause": "Invalid Python syntax in file",
+      "diagnosis": "File has syntax errors",
+      "recovery": "File skipped, search continues",
+      "state_impact": "Partial results returned",
+    },
+  ],
+  performance={
+    "time_complexity": "O(n*m) - n files, m average size",
+    "memory_usage": "One file at a time",
+    "concurrency": "Thread-safe",
+  },
+  see_also={
+    "search_files": "Find files before searching content",
+    "file_read": "Read entire file for complex analysis",
+  },
+  composition=["search_files → search_content", "search_content → file_read → file_write"],
+)
 @mcp.tool(
   name=f"{TOOL_PREFIX}_content",
   annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},

@@ -17,6 +17,7 @@ and invariants without dependency on external systems:
 - **Session** - Stateful development contexts tracking progress toward goals
 - **Task** - Bounded transformations executed through Claude Code
 - **PythonConfigSerializer** - Configuration as executable code philosophy
+- **ToolDocumentation** - Structured metadata for tool capabilities
 
 **Infrastructure Utilities**
 These provide controlled interfaces to external systems, isolating implementation
@@ -25,6 +26,7 @@ details from business logic:
 - **GitOperations** - Version control system integration
 - **FileSystemOperations** - Safe file manipulation within project boundaries
 - **SubprocessRunner** - Process execution with timeout and streaming
+- **ToolRegistry** - Runtime documentation introspection
 
 ## Architectural Principles
 
@@ -40,6 +42,10 @@ accidental or malicious operations outside the repository scope.
 Python configuration files provide executable, debuggable state persistence
 that developers can inspect and modify directly when needed.
 
+**Documentation as Code**
+Tool documentation co-locates with implementation through decorators,
+ensuring documentation accuracy while supporting runtime introspection.
+
 ## Integration Patterns
 
 The package supports multiple integration approaches:
@@ -47,6 +53,7 @@ The package supports multiple integration approaches:
 1. **Direct Domain Usage** - Import models for programmatic control
 2. **MCP Tool Wrappers** - Thin protocol adapters over domain logic
 3. **CLI Integration** - Command-line interfaces for developer workflows
+4. **Documentation Registry** - Runtime tool discovery and help generation
 
 This layered architecture ensures the core domain remains stable while
 supporting diverse integration requirements.
@@ -55,6 +62,19 @@ supporting diverse integration requirements.
 # Fundamental domain models
 from .serialization import PythonConfigSerializer
 from .session import Session, Task
+
+# Documentation system
+from .documentation import (
+  ToolDocumentation,
+  UsageScenario,
+  AntiPattern,
+  Example,
+  ErrorScenario,
+  PerformanceProfile,
+  ToolRegistry,
+  document_tool,
+  get_tool_registry,
+)
 
 # Project utilities
 from .project import find_git_root, get_git_project_name, get_safe_path
@@ -74,6 +94,16 @@ __all__ = [
   "PythonConfigSerializer",
   "Session",
   "Task",
+  # Documentation system
+  "ToolDocumentation",
+  "UsageScenario",
+  "AntiPattern",
+  "Example",
+  "ErrorScenario",
+  "PerformanceProfile",
+  "ToolRegistry",
+  "document_tool",
+  "get_tool_registry",
   # Project utilities
   "find_git_root",
   "get_git_project_name",

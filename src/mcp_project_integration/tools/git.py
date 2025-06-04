@@ -4,7 +4,7 @@ import logging
 import subprocess
 
 from ..server import mcp
-from ..core import GitOperations
+from ..core import GitOperations, document_tool
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +12,63 @@ logger = logging.getLogger(__name__)
 TOOL_PREFIX = "git"
 
 
+@document_tool(
+  name="git_status",
+  purpose="Analyze repository state including branches, commits, and working directory changes",
+  category="Git Operations",
+  operational_model="""
+  Parses git status output into structured data, categorizing files by their
+  state (staged, modified, untracked). Detects detached HEAD and empty repos.
+  """,
+  usage_scenarios=[
+    {"condition": "Before making commits", "rationale": "Understand what changes will be included"},
+    {
+      "condition": "Checking for clean working directory",
+      "rationale": "Ensure no uncommitted changes before operations",
+    },
+    {"condition": "Understanding repository state", "rationale": "Get comprehensive view of current work"},
+  ],
+  examples=[
+    {
+      "title": "Check repository state",
+      "code": "status = git_status()",
+      "explanation": "Get full repository status",
+      "complexity": 1,
+    },
+    {
+      "title": "Verify clean state",
+      "code": """status = git_status()
+if status['clean']:
+    print('Ready to switch branches')""",
+      "explanation": "Ensure no pending changes",
+      "complexity": 2,
+    },
+    {
+      "title": "List uncommitted files",
+      "code": """status = git_status()
+all_changes = status['staged'] + status['modified'] + status['untracked']
+print(f"Uncommitted files: {all_changes}")""",
+      "explanation": "Gather all changed files",
+      "complexity": 2,
+    },
+  ],
+  error_scenarios=[
+    {
+      "error_type": "Not in repository",
+      "cause": "Called outside git repository",
+      "diagnosis": "Check current directory",
+      "recovery": "Navigate to git repository",
+      "state_impact": "Returns error dict",
+    }
+  ],
+  performance={
+    "time_complexity": "O(n) with tracked files",
+    "memory_usage": "Minimal - metadata only",
+    "concurrency": "Thread-safe",
+  },
+  see_also={"git_diff": "View actual changes", "git_commit": "Commit staged changes"},
+  composition=["git_status → git_commit", "git_status → git_diff"],
+)
 @mcp.tool(
   name=f"{TOOL_PREFIX}_status",
   annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
@@ -102,6 +159,78 @@ def git_status() -> dict:
     return {"error": str(e)}
 
 
+@document_tool(
+  name="git_commit",
+  purpose="Create permanent commits in git history with optional file staging",
+  category="Git Operations",
+  operational_model="""
+  Optionally stages specified files, then creates a commit with the provided
+  message. Requires at least one staged change. Uses system git configuration
+  for author information.
+  """,
+  usage_scenarios=[
+    {"condition": "Saving completed work", "rationale": "Create permanent checkpoint in history"},
+    {"condition": "Before risky operations", "rationale": "Enable rollback if needed"},
+    {"condition": "Documenting logical changes", "rationale": "Track project evolution with clear messages"},
+  ],
+  anti_patterns=[
+    {
+      "condition": "Committing without testing",
+      "reason": "May introduce broken state",
+      "alternative": "Test changes before committing",
+    },
+    {
+      "condition": "Large monolithic commits",
+      "reason": "Difficult to review and revert",
+      "alternative": "Make focused, atomic commits",
+    },
+  ],
+  examples=[
+    {
+      "title": "Commit all staged changes",
+      "code": 'git_commit("Fix authentication bug")',
+      "explanation": "Commits pre-staged changes",
+      "complexity": 1,
+    },
+    {
+      "title": "Stage and commit specific files",
+      "code": 'git_commit("Add user model", ["models/user.py", "tests/test_user.py"])',
+      "explanation": "Stage files then commit",
+      "complexity": 2,
+    },
+    {
+      "title": "Commit with validation",
+      "code": """result = git_commit("Update config")
+if result['status'] == 'success':
+    print(f"Created commit {result['commit']}")""",
+      "explanation": "Handle commit result",
+      "complexity": 2,
+    },
+  ],
+  error_scenarios=[
+    {
+      "error_type": "No changes staged",
+      "cause": "Nothing to commit",
+      "diagnosis": "Check git_status for changes",
+      "recovery": "Stage files or make modifications",
+      "state_impact": "No commit created",
+    },
+    {
+      "error_type": "Invalid file paths",
+      "cause": "Specified files don't exist",
+      "diagnosis": "Verify file paths",
+      "recovery": "Correct file list",
+      "state_impact": "No commit created",
+    },
+  ],
+  performance={
+    "time_complexity": "O(n) with file count",
+    "memory_usage": "Proportional to changes",
+    "concurrency": "Not safe - single writer",
+  },
+  see_also={"git_status": "Check what will be committed", "git_log": "View commit history"},
+  composition=["file_write → git_status → git_commit"],
+)
 @mcp.tool(
   name=f"{TOOL_PREFIX}_commit",
   annotations={
@@ -172,6 +301,49 @@ def git_commit(message: str, files: list[str] = None) -> dict:
     return {"status": "error", "error": error_msg}
 
 
+@document_tool(
+  name="git_log",
+  purpose="Retrieve commit history with author and message information",
+  category="Git Operations",
+  operational_model="""
+  Fetches commit history in reverse chronological order, parsing git log output
+  into structured format. Limited to prevent excessive memory usage.
+  """,
+  usage_scenarios=[
+    {"condition": "Reviewing recent changes", "rationale": "Understand project evolution"},
+    {"condition": "Finding specific commits", "rationale": "Locate changes by message or author"},
+    {"condition": "Generating changelogs", "rationale": "Extract commit information for documentation"},
+  ],
+  examples=[
+    {
+      "title": "Get recent commits",
+      "code": "commits = git_log(10)",
+      "explanation": "Fetch last 10 commits",
+      "complexity": 1,
+    },
+    {
+      "title": "Find commits by author",
+      "code": """commits = git_log(50)
+my_commits = [c for c in commits if 'john' in c['author'].lower()]""",
+      "explanation": "Filter commits by author",
+      "complexity": 2,
+    },
+    {
+      "title": "Extract commit messages",
+      "code": """commits = git_log(20)
+messages = [c['message'] for c in commits if 'fix' in c['message'].lower()]""",
+      "explanation": "Find fix commits",
+      "complexity": 2,
+    },
+  ],
+  performance={
+    "time_complexity": "O(n) with commit count",
+    "memory_usage": "Proportional to max_count",
+    "concurrency": "Thread-safe",
+  },
+  see_also={"git_status": "Current repository state", "git_diff": "View changes in commits"},
+  composition=["git_commit → git_log"],
+)
 @mcp.tool(
   name=f"{TOOL_PREFIX}_log",
   annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
@@ -249,6 +421,64 @@ def git_log(max_count: int = 10) -> list[dict]:
     return [{"error": str(e)}]
 
 
+@document_tool(
+  name="git_diff",
+  purpose="Show detailed changes in working directory or staging area",
+  category="Git Operations",
+  operational_model="""
+  Generates unified diff output showing line-by-line changes. Can show unstaged
+  changes, staged changes, or specific file diffs. Empty for no changes.
+  """,
+  usage_scenarios=[
+    {"condition": "Reviewing changes before commit", "rationale": "Understand exact modifications"},
+    {"condition": "Generating patches", "rationale": "Create applicable diff output"},
+    {"condition": "Validating expected changes", "rationale": "Ensure correct modifications"},
+  ],
+  examples=[
+    {
+      "title": "View all unstaged changes",
+      "code": "diff = git_diff()",
+      "explanation": "See working directory changes",
+      "complexity": 1,
+    },
+    {
+      "title": "View staged changes",
+      "code": "diff = git_diff(staged=True)",
+      "explanation": "See what will be committed",
+      "complexity": 1,
+    },
+    {
+      "title": "Check specific file",
+      "code": 'diff = git_diff("src/main.py")',
+      "explanation": "Diff single file",
+      "complexity": 2,
+    },
+    {
+      "title": "Save diff as patch",
+      "code": """diff = git_diff()
+if diff != "No differences found":
+    file_write("changes.patch", diff)""",
+      "explanation": "Export diff for later use",
+      "complexity": 2,
+    },
+  ],
+  error_scenarios=[
+    {
+      "error_type": "File not tracked",
+      "cause": "Specified file not in git",
+      "diagnosis": "File may be untracked",
+      "recovery": "Add file to git first",
+      "state_impact": "Returns error message",
+    }
+  ],
+  performance={
+    "time_complexity": "O(n) with change size",
+    "memory_usage": "Full diff in memory",
+    "concurrency": "Thread-safe",
+  },
+  see_also={"git_status": "List changed files", "patch_apply": "Apply diff output"},
+  composition=["git_diff → patch_apply", "file_write → git_diff"],
+)
 @mcp.tool(
   name=f"{TOOL_PREFIX}_diff",
   annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},

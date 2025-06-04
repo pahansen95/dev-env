@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..server import mcp
-from ..core import get_safe_path, find_git_root
+from ..core import get_safe_path, find_git_root, document_tool
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +216,87 @@ class ContextMatcher:
     return line.rstrip()
 
 
+@document_tool(
+  name="patch_apply",
+  purpose="Apply unified diff patches with intelligent fuzzy matching and automatic backups",
+  category="Development",
+  operational_model="""
+  Parses unified diff format, locates context with fuzzy matching (85% threshold),
+  applies changes while creating backups, then validates syntax. Handles displaced
+  code by searching ±10 lines from expected location.
+  """,
+  usage_scenarios=[
+    {"condition": "Applying code review suggestions", "rationale": "Programmatically implement reviewer feedback"},
+    {"condition": "Testing incremental modifications", "rationale": "Safe application with automatic backup"},
+    {"condition": "Implementing generated code changes", "rationale": "Apply AI-suggested modifications reliably"},
+  ],
+  anti_patterns=[
+    {
+      "condition": "Applying to wrong file version",
+      "reason": "Context may not match",
+      "alternative": "Ensure patch matches current file state",
+    },
+    {
+      "condition": "Multi-file patches",
+      "reason": "Only handles single file patches",
+      "alternative": "Split into separate patches per file",
+    },
+  ],
+  examples=[
+    {
+      "title": "Apply simple patch",
+      "code": '''patch = """--- a/config.py
+@@ -1,3 +1,3 @@
+-DEBUG = False
++DEBUG = True
+"""
+result = patch_apply("config.py", patch)''',
+      "explanation": "Change configuration value",
+      "complexity": 1,
+    },
+    {
+      "title": "Apply with validation",
+      "code": """result = patch_apply("main.py", patch_content)
+if result['status'] == 'success':
+    print(f"Applied {result['hunks_applied']} hunks")
+    if not result['syntax_validation']['valid']:
+        print("Warning: Syntax errors after patch")""",
+      "explanation": "Check patch success and syntax",
+      "complexity": 2,
+    },
+    {
+      "title": "Apply from git diff",
+      "code": """diff = git_diff("feature.py")
+# Make manual edits to diff...
+result = patch_apply("feature.py", modified_diff)""",
+      "explanation": "Apply modified git diff output",
+      "complexity": 3,
+    },
+  ],
+  error_scenarios=[
+    {
+      "error_type": "Context not found",
+      "cause": "Expected lines don't match file content",
+      "diagnosis": "Check if patch matches file version",
+      "recovery": "Update patch or file to match",
+      "state_impact": "File restored from backup",
+    },
+    {
+      "error_type": "Syntax error after patch",
+      "cause": "Patch creates invalid Python/JSON",
+      "diagnosis": "Review patch content",
+      "recovery": "Fix patch or restore from backup",
+      "state_impact": "File modified but syntax invalid",
+    },
+  ],
+  performance={
+    "time_complexity": "O(n*m) - n hunks, m file lines",
+    "memory_usage": "Full file content in memory",
+    "concurrency": "Not safe - single file writer",
+  },
+  see_also={"git_diff": "Generate patches from git", "file_write": "Direct file modification alternative"},
+  composition=["git_diff → patch_apply", "file_read → (modify) → patch_apply"],
+)
 @mcp.tool(
   name=f"{TOOL_PREFIX}_apply",
   annotations={
