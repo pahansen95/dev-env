@@ -4,7 +4,7 @@ import logging
 import subprocess
 import sys
 from mcp.server.fastmcp import FastMCP
-from .utils import get_git_project_name
+from .core import get_git_project_name
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", stream=sys.stderr)

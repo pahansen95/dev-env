@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
-from .utils import find_git_root, get_git_project_name, add_file_logging
+from .core import find_git_root, get_git_project_name, add_file_logging
 from .server import mcp
 
 logger = logging.getLogger(__name__)

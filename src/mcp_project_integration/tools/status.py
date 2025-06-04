@@ -6,7 +6,7 @@ import sys
 from datetime import datetime
 
 from ..server import mcp
-from ..utils import find_git_root, get_git_project_name, run_git_command
+from ..core import find_git_root, get_git_project_name, GitOperations
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +25,11 @@ def status() -> dict:
 
     # Git status
     try:
-      branch = run_git_command(["branch", "--show-current"])
-      commit = run_git_command(["rev-parse", "--short", "HEAD"])
+      branch = GitOperations.get_current_branch()
+      commit = GitOperations.get_output(["rev-parse", "--short", "HEAD"])
 
       # Check for uncommitted changes
-      git_status = run_git_command(["status", "--porcelain"])
+      git_status = GitOperations.get_output(["status", "--porcelain"])
       is_clean = len(git_status) == 0
 
       status_info["git"] = {

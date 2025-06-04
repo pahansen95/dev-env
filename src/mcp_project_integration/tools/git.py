@@ -4,7 +4,7 @@ import logging
 import subprocess
 
 from ..server import mcp
-from ..utils import run_git_command
+from ..core import GitOperations
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +16,10 @@ def git_status() -> dict:
 
   try:
     # Get current branch
-    branch = run_git_command(["branch", "--show-current"])
+    branch = GitOperations.get_current_branch()
 
     # Get status information
-    status_output = run_git_command(["status", "--porcelain=v1"])
+    status_output = GitOperations.get_output(["status", "--porcelain=v1"])
 
     # Parse status output
     staged = []
@@ -42,11 +42,11 @@ def git_status() -> dict:
         untracked.append(file_path)
 
     # Get commit info
-    commit = run_git_command(["rev-parse", "--short", "HEAD"])
+    commit = GitOperations.get_output(["rev-parse", "--short", "HEAD"])
 
     # Check if detached HEAD
     try:
-      run_git_command(["symbolic-ref", "-q", "HEAD"])
+      GitOperations.get_output(["symbolic-ref", "-q", "HEAD"])
       detached = False
     except subprocess.CalledProcessError:
       detached = True
@@ -87,19 +87,11 @@ def git_commit(message: str, files: list[str] = None) -> dict:
   try:
     # Stage files if specified
     if files:
-      for file in files:
-        try:
-          run_git_command(["add", file])
-        except subprocess.CalledProcessError as e:
-          error_msg = f"Failed to stage {file}: {str(e)}"
-          if hasattr(e, "stderr") and e.stderr:
-            error_msg += f" - {e.stderr}"
-          logger.error(error_msg)
-          return {"status": "error", "error": error_msg}
+      GitOperations.stage_files(files)
 
     # Check if there are changes to commit
     try:
-      run_git_command(["diff-index", "--quiet", "--cached", "HEAD"])
+      GitOperations.get_output(["diff-index", "--quiet", "--cached", "HEAD"])
       # No changes staged
       return {"status": "error", "error": "No changes staged for commit"}
     except subprocess.CalledProcessError:
@@ -107,12 +99,9 @@ def git_commit(message: str, files: list[str] = None) -> dict:
       pass
 
     # Create commit
-    run_git_command(["commit", "-m", message])
+    commit_hash = GitOperations.commit(message)
 
-    # Get new commit info
-    commit_hash = run_git_command(["rev-parse", "--short", "HEAD"])
-
-    return {"status": "success", "commit": commit_hash, "message": message}
+    return {"status": "success", "commit": commit_hash[:8], "message": message}
   except subprocess.CalledProcessError as e:
     error_msg = str(e)
     if hasattr(e, "stderr") and e.stderr:
@@ -142,7 +131,7 @@ def git_log(max_count: int = 10) -> list[dict]:
 
     # Get log with custom format
     log_format = "%H|%h|%an|%ae|%ad|%s"
-    log_output = run_git_command(["log", f"--max-count={max_count}", f"--format={log_format}", "--date=iso"])
+    log_output = GitOperations.get_output(["log", f"--max-count={max_count}", f"--format={log_format}", "--date=iso"])
 
     if not log_output:
       return []
@@ -200,12 +189,12 @@ def git_diff(file: str = None, staged: bool = False) -> str:
     if file:
       # Validate file path exists in repo
       try:
-        run_git_command(["ls-files", "--error-unmatch", file])
+        GitOperations.get_output(["ls-files", "--error-unmatch", file])
       except subprocess.CalledProcessError:
         return f"Error: File '{file}' is not tracked by git"
       args.append(file)
 
-    diff_output = run_git_command(args)
+    diff_output = GitOperations.get_output(args)
     return diff_output if diff_output else "No differences found"
 
   except subprocess.CalledProcessError as e:

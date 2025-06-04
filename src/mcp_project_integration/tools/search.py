@@ -5,7 +5,7 @@ import logging
 import re
 
 from ..server import mcp
-from ..utils import get_safe_path, find_git_root
+from ..core import get_safe_path, find_git_root
 
 logger = logging.getLogger(__name__)
 

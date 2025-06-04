@@ -6,5 +6,6 @@ from . import filesystem
 from . import search
 from . import git
 from . import development
+from . import claude_code
 
-__all__ = ["status", "filesystem", "search", "git", "development"]
+__all__ = ["status", "filesystem", "search", "git", "development", "claude_code"]
