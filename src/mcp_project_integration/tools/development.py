@@ -300,7 +300,8 @@ def apply_patch(file_path: str, patch: str) -> dict:
 
     # Calculate total lines changed
     lines_changed = sum(
-      len([l for t, l in h.raw_lines if t == "-"]) + len([l for t, l in h.raw_lines if t == "+"]) for h in parser.hunks
+      len([l for t, l in h.raw_lines if t == "-"]) + len([l for t, l in h.raw_lines if t == "+"])
+      for h in parser.hunks  # noqa: E741
     )
 
     return {
