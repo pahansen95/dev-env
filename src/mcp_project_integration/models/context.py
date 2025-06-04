@@ -1,11 +1,16 @@
-"""Context management for Claude Code sessions"""
+"""Context management for Claude Code sessions
+
+Maintains accumulated knowledge and state across task executions using
+Python configuration files for human-readable persistence.
+"""
 
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Dict, Optional
 from pathlib import Path
-import importlib.util
 import logging
+
+from ..core import PythonConfigSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +48,12 @@ class VerificationResult:
 
 
 class SessionContext:
-  """Accumulated context across task executions"""
+  """Accumulated context across task executions
+
+  Tracks discovered patterns, architectural decisions, and verification
+  results throughout a coding session. Persists state using Python
+  configuration files for easy inspection and debugging.
+  """
 
   def __init__(self, session_id: str):
     self.session_id = session_id
@@ -78,19 +88,14 @@ class SessionContext:
     return {
       "session_id": self.session_id,
       "discovered_patterns": [
-        {
-          "name": p.name,
-          "description": p.description,
-          "examples": p.examples,
-          "discovered_at": p.discovered_at.isoformat(),
-        }
+        {"name": p.name, "description": p.description, "examples": p.examples, "discovered_at": p.discovered_at}
         for p in self.discovered_patterns
       ],
       "architectural_decisions": [
         {
           "description": d.description,
           "rationale": d.rationale,
-          "timestamp": d.timestamp.isoformat(),
+          "timestamp": d.timestamp,
           "related_files": d.related_files,
         }
         for d in self.architectural_decisions
@@ -101,7 +106,7 @@ class SessionContext:
           "tests_passed": r.tests_passed,
           "tests_failed": r.tests_failed,
           "errors": r.errors,
-          "timestamp": r.timestamp.isoformat(),
+          "timestamp": r.timestamp,
         }
         for task_id, r in self.verification_results.items()
       },
@@ -110,12 +115,15 @@ class SessionContext:
 
   def save(self, path: Path):
     """Save context to Python file"""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    data = self.to_dict()
 
-    with open(path, "w") as f:
-      f.write("# Auto-generated session context\n")
-      f.write("from datetime import datetime\n\n")
-      f.write(f"CONTEXT = {repr(self.to_dict())}\n")
+    imports = {
+      "datetime": "from datetime import datetime",
+    }
+
+    PythonConfigSerializer.write_config(
+      path=path, config_name="CONTEXT", data=data, imports=imports, header="Auto-generated session context"
+    )
 
   @classmethod
   def load(cls, path: Path, session_id: str) -> "SessionContext":
@@ -123,23 +131,18 @@ class SessionContext:
     if not path.exists():
       return cls(session_id)
 
-    # Load Python module dynamically
-    spec = importlib.util.spec_from_file_location("context", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+      context_data = PythonConfigSerializer.read_config(path, "CONTEXT")
+    except Exception as e:
+      logger.warning(f"Failed to load context from {path}: {e}")
+      return cls(session_id)
 
-    context_data = module.CONTEXT
     context = cls(session_id)
 
     # Restore patterns
     for p in context_data.get("discovered_patterns", []):
       context.discovered_patterns.append(
-        Pattern(
-          name=p["name"],
-          description=p["description"],
-          examples=p["examples"],
-          discovered_at=datetime.fromisoformat(p["discovered_at"]),
-        )
+        Pattern(name=p["name"], description=p["description"], examples=p["examples"], discovered_at=p["discovered_at"])
       )
 
     # Restore decisions
@@ -148,7 +151,7 @@ class SessionContext:
         Decision(
           description=d["description"],
           rationale=d["rationale"],
-          timestamp=datetime.fromisoformat(d["timestamp"]),
+          timestamp=d["timestamp"],
           related_files=d["related_files"],
         )
       )
@@ -161,7 +164,7 @@ class SessionContext:
         tests_passed=r["tests_passed"],
         tests_failed=r["tests_failed"],
         errors=r["errors"],
-        timestamp=datetime.fromisoformat(r["timestamp"]),
+        timestamp=r["timestamp"],
       )
 
     # Restore memories

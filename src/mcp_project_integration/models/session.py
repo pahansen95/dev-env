@@ -1,15 +1,21 @@
-"""Coding session management for Claude Code integration"""
+"""Coding session management for Claude Code integration
+
+Manages stateful development contexts that track progress toward engineering
+goals. Sessions persist state using Python configuration files and leverage
+Git for change tracking.
+"""
 
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, List
 from enum import Enum
-import importlib.util
 import logging
 
 from .context import SessionContext
 from .git_tracker import GitStateTracker
+from ..core import PythonConfigSerializer
+from ..core.utils import FileSystemOperations
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +30,11 @@ class SessionStatus(Enum):
 
 
 class CodingSession:
-  """Manages a stateful development context toward an engineering goal"""
+  """Manages a stateful development context toward an engineering goal
+
+  Sessions provide continuity across multiple task executions, maintaining
+  accumulated knowledge and tracking progress through Git integration.
+  """
 
   def __init__(self, session_id: Optional[str] = None, goal: Optional[str] = None, base_path: Optional[Path] = None):
     self.id = session_id or str(uuid.uuid4())
@@ -50,10 +60,10 @@ class CodingSession:
     self.checkpoint_count = 0
 
     # Create directory structure
-    self.base_path.mkdir(parents=True, exist_ok=True)
-    (self.base_path / "tasks").mkdir(exist_ok=True)
-    (self.base_path / "checkpoints").mkdir(exist_ok=True)
-    (self.base_path / "claude_history").mkdir(exist_ok=True)
+    FileSystemOperations.ensure_directory(self.base_path)
+    FileSystemOperations.ensure_directory(self.base_path / "tasks")
+    FileSystemOperations.ensure_directory(self.base_path / "checkpoints")
+    FileSystemOperations.ensure_directory(self.base_path / "claude_history")
 
     # Save initial config
     self._save_config()
@@ -61,37 +71,34 @@ class CodingSession:
 
   def _save_config(self):
     """Persist session configuration to Python file"""
-    config_path = self.base_path / "config.py"
+    data = {
+      "id": self.id,
+      "goal": self.goal,
+      "status": self.status,
+      "created_at": self.created_at,
+      "updated_at": self.updated_at,
+      "git_branch": self.git_branch,
+      "git_start": self.git_start,
+      "checkpoint_count": self.checkpoint_count,
+    }
 
-    config_content = f'''# Coding session configuration
-from datetime import datetime
-from models.session import SessionStatus
+    imports = {
+      "datetime": "from datetime import datetime",
+      "session": "from mcp_project_integration.models.session import SessionStatus",
+    }
 
-SESSION_CONFIG = {{
-    "id": "{self.id}",
-    "goal": {repr(self.goal)},
-    "status": SessionStatus.{self.status.name},
-    "created_at": datetime.fromisoformat("{self.created_at.isoformat()}"),
-    "updated_at": datetime.fromisoformat("{self.updated_at.isoformat()}"),
-    "git_branch": "{self.git_branch}",
-    "git_start": "{self.git_start}",
-    "checkpoint_count": {self.checkpoint_count},
-}}
-'''
-
-    with open(config_path, "w") as f:
-      f.write(config_content)
+    PythonConfigSerializer.write_config(
+      path=self.base_path / "config.py",
+      config_name="SESSION_CONFIG",
+      data=data,
+      imports=imports,
+      header="Coding session configuration",
+    )
 
   def _load_config(self):
     """Load session configuration from Python file"""
-    config_path = self.base_path / "config.py"
+    config = PythonConfigSerializer.read_config(self.base_path / "config.py", "SESSION_CONFIG")
 
-    # Load module dynamically
-    spec = importlib.util.spec_from_file_location("config", config_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    config = module.SESSION_CONFIG
     self.goal = config["goal"]
     self.status = config["status"]
     self.created_at = config["created_at"]
@@ -103,18 +110,29 @@ SESSION_CONFIG = {{
   def link_task(self, task_id: str):
     """Create symlink from task to session"""
     task_link = self.base_path / "tasks" / task_id
-    task_target = Path("../../tasks") / task_id
+    task_source = Path("../../../tasks") / task_id
 
-    if not task_link.exists():
-      task_link.symlink_to(task_target)
+    try:
+      FileSystemOperations.create_symlink(task_source, task_link)
       logger.info(f"Linked task {task_id} to session {self.id}")
+    except FileExistsError:
+      logger.debug(f"Task {task_id} already linked to session {self.id}")
 
   def get_file_changes(self) -> Dict[str, List[str]]:
     """Get all file changes since session start"""
     return GitStateTracker.get_changes_since(self.git_start)
 
   def checkpoint(self, message: Optional[str] = None) -> str:
-    """Create session checkpoint"""
+    """Create session checkpoint
+
+    Saves current context and creates a Git commit with session metadata.
+
+    Args:
+        message: Optional checkpoint message
+
+    Returns:
+        Git commit SHA for the checkpoint
+    """
     self.checkpoint_count += 1
     checkpoint_message = message or f"Session {self.id} checkpoint {self.checkpoint_count}"
 
@@ -131,15 +149,19 @@ SESSION_CONFIG = {{
     commit_sha = GitStateTracker.commit(checkpoint_message, metadata)
 
     # Save checkpoint reference
-    checkpoint_path = self.base_path / "checkpoints" / f"{self.checkpoint_count:03d}.py"
-    with open(checkpoint_path, "w") as f:
-      f.write(f"# Checkpoint {self.checkpoint_count}\n")
-      f.write("CHECKPOINT = {\n")
-      f.write(f'    "number": {self.checkpoint_count},\n')
-      f.write(f'    "commit": "{commit_sha}",\n')
-      f.write(f'    "timestamp": "{datetime.now().isoformat()}",\n')
-      f.write(f'    "message": {repr(message)},\n')
-      f.write("}\n")
+    checkpoint_data = {
+      "number": self.checkpoint_count,
+      "commit": commit_sha,
+      "timestamp": datetime.now(),
+      "message": message,
+    }
+
+    PythonConfigSerializer.write_config(
+      path=self.base_path / "checkpoints" / f"{self.checkpoint_count:03d}.py",
+      config_name="CHECKPOINT",
+      data=checkpoint_data,
+      header=f"Checkpoint {self.checkpoint_count}",
+    )
 
     self.updated_at = datetime.now()
     self._save_config()
@@ -148,7 +170,14 @@ SESSION_CONFIG = {{
     return commit_sha
 
   def complete(self, verification_passed: bool = True) -> bool:
-    """Mark session as completed"""
+    """Mark session as completed
+
+    Args:
+        verification_passed: Whether session goals were achieved
+
+    Returns:
+        True if session completed successfully
+    """
     if verification_passed:
       self.status = SessionStatus.COMPLETED
       logger.info(f"Session {self.id} completed successfully")
@@ -180,12 +209,18 @@ SESSION_CONFIG = {{
   def save_claude_history(self, conversation: str, timestamp: Optional[datetime] = None):
     """Save Claude conversation history"""
     ts = timestamp or datetime.now()
-    history_file = self.base_path / "claude_history" / f"{ts.strftime('%Y%m%d_%H%M%S')}.py"
 
-    with open(history_file, "w") as f:
-      f.write("# Claude conversation history\n")
-      f.write(f'TIMESTAMP = "{ts.isoformat()}"\n')
-      f.write(f'CONVERSATION = """\n{conversation}\n"""\n')
+    history_data = {
+      "timestamp": ts,
+      "conversation": conversation,
+    }
+
+    PythonConfigSerializer.write_config(
+      path=self.base_path / "claude_history" / f"{ts.strftime('%Y%m%d_%H%M%S')}.py",
+      config_name="HISTORY",
+      data=history_data,
+      header="Claude conversation history",
+    )
 
   def get_linked_tasks(self) -> List[str]:
     """Get list of task IDs linked to this session"""
@@ -193,13 +228,12 @@ SESSION_CONFIG = {{
     if not tasks_dir.exists():
       return []
 
-    return sorted([task.name for task in tasks_dir.iterdir() if task.is_symlink()])
+    return sorted([task.name for task in FileSystemOperations.list_directory(tasks_dir) if task.is_symlink()])
 
   @classmethod
   def create(cls, goal: str) -> "CodingSession":
     """Create new coding session"""
-    session = cls(goal=goal)
-    return session
+    return cls(goal=goal)
 
   @classmethod
   def load(cls, session_id: str) -> "CodingSession":
@@ -218,7 +252,7 @@ SESSION_CONFIG = {{
       return []
 
     sessions = []
-    for session_path in sessions_dir.iterdir():
+    for session_path in FileSystemOperations.list_directory(sessions_dir):
       if session_path.is_dir() and (session_path / "config.py").exists():
         try:
           session = cls.load(session_path.name)

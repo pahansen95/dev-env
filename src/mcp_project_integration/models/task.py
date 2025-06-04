@@ -1,17 +1,22 @@
-"""Development task execution for Claude Code integration"""
+"""Development task execution for Claude Code integration
+
+Encapsulates bounded transformation operations executed through Claude Code,
+with Git-based change tracking and verification.
+"""
 
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
 from enum import Enum
-import importlib.util
 import logging
 
 from .session import CodingSession
 from .executor import ClaudeCodeExecutor, ClaudeCodeOutput
 from .git_tracker import GitStateTracker
 from .context import SessionContext, VerificationResult
+from ..core import PythonConfigSerializer
+from ..core.utils import FileSystemOperations, GitOperations, SubprocessResult
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +43,11 @@ class TaskStatus(Enum):
 
 
 class DevTask:
-  """Bounded transformation operation executed through Claude Code"""
+  """Bounded transformation operation executed through Claude Code
+
+  Represents a single development task within a coding session, tracking
+  intent, scope, execution results, and Git state changes.
+  """
 
   def __init__(
     self,
@@ -75,7 +84,7 @@ class DevTask:
     self.verification_passed = None
 
     # Create directory
-    self.base_path.mkdir(parents=True, exist_ok=True)
+    FileSystemOperations.ensure_directory(self.base_path)
 
     # Save initial config
     self._save_config()
@@ -83,37 +92,35 @@ class DevTask:
 
   def _save_config(self):
     """Persist task configuration"""
-    config_path = self.base_path / "config.py"
+    data = {
+      "id": self.id,
+      "session_id": self.session_id,
+      "intent": self.intent,
+      "scope": self.scope,
+      "task_type": self.task_type,
+      "status": self.status,
+      "created_at": self.created_at,
+      "updated_at": self.updated_at,
+      "verification_passed": self.verification_passed,
+    }
 
-    config_content = f'''# Development task configuration
-from datetime import datetime
-from models.task import TaskType, TaskStatus
+    imports = {
+      "datetime": "from datetime import datetime",
+      "task": "from mcp_project_integration.models.task import TaskType, TaskStatus",
+    }
 
-TASK_CONFIG = {{
-    "id": "{self.id}",
-    "session_id": {repr(self.session_id)},
-    "intent": {repr(self.intent)},
-    "scope": {repr(self.scope)},
-    "task_type": TaskType.{self.task_type.name},
-    "status": TaskStatus.{self.status.name},
-    "created_at": datetime.fromisoformat("{self.created_at.isoformat()}"),
-    "updated_at": datetime.fromisoformat("{self.updated_at.isoformat()}"),
-    "verification_passed": {repr(self.verification_passed)},
-}}
-'''
-
-    with open(config_path, "w") as f:
-      f.write(config_content)
+    PythonConfigSerializer.write_config(
+      path=self.base_path / "config.py",
+      config_name="TASK_CONFIG",
+      data=data,
+      imports=imports,
+      header="Development task configuration",
+    )
 
   def _load_config(self):
     """Load task configuration"""
-    config_path = self.base_path / "config.py"
+    config = PythonConfigSerializer.read_config(self.base_path / "config.py", "TASK_CONFIG")
 
-    spec = importlib.util.spec_from_file_location("config", config_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    config = module.TASK_CONFIG
     self.session_id = config["session_id"]
     self.intent = config["intent"]
     self.scope = config["scope"]
@@ -130,21 +137,31 @@ TASK_CONFIG = {{
 
     intent_lower = intent.lower()
 
-    if any(word in intent_lower for word in ["review", "check", "analyze"]):
-      return TaskType.REVIEW
-    elif any(word in intent_lower for word in ["test", "testing", "coverage"]):
-      return TaskType.TEST
-    elif any(word in intent_lower for word in ["refactor", "restructure", "reorganize"]):
-      return TaskType.REFACTOR
-    elif any(word in intent_lower for word in ["document", "docs", "comment"]):
-      return TaskType.DOCUMENT
-    elif any(word in intent_lower for word in ["debug", "fix", "resolve", "error"]):
-      return TaskType.DEBUG
-    else:
-      return TaskType.IMPLEMENT
+    # Define keyword mappings
+    type_keywords = {
+      TaskType.REVIEW: ["review", "check", "analyze", "inspect"],
+      TaskType.TEST: ["test", "testing", "coverage", "verify"],
+      TaskType.REFACTOR: ["refactor", "restructure", "reorganize", "cleanup"],
+      TaskType.DOCUMENT: ["document", "docs", "comment", "explain"],
+      TaskType.DEBUG: ["debug", "fix", "resolve", "error", "bug"],
+    }
+
+    # Check each task type
+    for task_type, keywords in type_keywords.items():
+      if any(keyword in intent_lower for keyword in keywords):
+        return task_type
+
+    return TaskType.IMPLEMENT
 
   def execute(self, context: SessionContext) -> "DevTask":
-    """Execute task with Claude Code"""
+    """Execute task with Claude Code
+
+    Args:
+        context: Session context with accumulated knowledge
+
+    Returns:
+        Self for method chaining
+    """
     logger.info(f"Executing task {self.id}: {self.intent}")
 
     # Update status
@@ -215,13 +232,13 @@ TASK_CONFIG = {{
     except Exception as e:
       logger.error(f"Task {self.id} failed with exception: {e}")
       self.status = TaskStatus.FAILED
-      self.result = ClaudeCodeOutput("", str(e), -1)
+      self.result = ClaudeCodeOutput(SubprocessResult("", str(e), -1, ["claude-code"]))
 
     finally:
       # Restore stashed changes if any
       if stash_ref:
         try:
-          GitStateTracker.run_git_command(["stash", "pop"])
+          GitOperations.run_command(["stash", "pop"])
           logger.info("Restored stashed changes")
         except Exception as e:
           logger.warning(f"Failed to restore stash: {e}")
@@ -233,7 +250,10 @@ TASK_CONFIG = {{
     return self
 
   def _verify_changes(self) -> bool:
-    """Verify task execution results"""
+    """Verify task execution results
+
+    Implements task-type specific verification strategies.
+    """
     if not self.result or not self.result.success:
       return False
 
@@ -268,30 +288,15 @@ TASK_CONFIG = {{
     if not self.result:
       return
 
-    result_path = self.base_path / "result.py"
+    result_data = self.result.to_dict()
+    result_data["git_state"] = {
+      "before": self.git_state_before,
+      "after": self.git_state_after,
+    }
 
-    result_content = f'''# Task execution result
-from datetime import datetime
-
-RESULT = {{
-    "stdout": """{self.result.stdout}""",
-    "stderr": """{self.result.stderr}""",
-    "return_code": {self.result.return_code},
-    "timestamp": datetime.fromisoformat("{self.result.timestamp.isoformat()}"),
-    "files_modified": {repr(self.result.files_modified)},
-    "files_created": {repr(self.result.files_created)},
-    "tests_run": {self.result.tests_run},
-    "tests_passed": {self.result.tests_passed},
-}}
-
-GIT_STATE = {{
-    "before": {repr(self.git_state_before)},
-    "after": {repr(self.git_state_after)},
-}}
-'''
-
-    with open(result_path, "w") as f:
-      f.write(result_content)
+    PythonConfigSerializer.write_config(
+      path=self.base_path / "result.py", config_name="RESULT", data=result_data, header="Task execution result"
+    )
 
   def get_diff(self) -> str:
     """Get diff of changes made by this task"""
@@ -304,14 +309,18 @@ GIT_STATE = {{
     )
 
   def rollback(self) -> bool:
-    """Rollback changes made by this task"""
+    """Rollback changes made by this task
+
+    Returns:
+        True if rollback succeeded
+    """
     if self.status != TaskStatus.COMPLETED:
       logger.warning(f"Cannot rollback task {self.id} with status {self.status}")
       return False
 
     try:
       # Reset to state before task
-      GitStateTracker.run_git_command(["reset", "--hard", self.git_state_before["commit"]])
+      GitOperations.reset_hard(self.git_state_before["commit"])
 
       self.status = TaskStatus.ROLLED_BACK
       self.updated_at = datetime.now()
@@ -328,7 +337,7 @@ GIT_STATE = {{
   def create(
     cls, session_id: str, intent: str, scope: Optional[List[str]] = None, task_type: Optional[TaskType] = None
   ) -> "DevTask":
-    """Create new task"""
+    """Create new task and link to session"""
     task = cls(session_id=session_id, intent=intent, scope=scope, task_type=task_type)
 
     # Link to session
