@@ -207,45 +207,194 @@ class Task:
     Manages Git state, runs Claude Code subprocess, and commits
     successful changes. Returns execution success status.
     """
+    # Log task execution start
+    logger.info(f"Starting task execution: {self.id}")
+    logger.info(f"Intent: {self.intent}")
+    logger.debug(f"Session: {self.session_id}")
+    logger.debug(f"Git state before: {self.before_commit[:8]}")
+
     # Ensure clean working directory
     stash_ref = None
     if not GitOperations.is_clean():
+      # Parse git status to get file counts
+      try:
+        status_output = GitOperations.get_output(["status", "--porcelain=v1"])
+        modified_count = 0
+        untracked_count = 0
+
+        for line in status_output.splitlines():
+          if line:
+            status_code = line[:2]
+            if status_code[1] in "MD":  # Modified or Deleted in working tree
+              modified_count += 1
+            elif status_code == "??":  # Untracked
+              untracked_count += 1
+
+        logger.info(f"Working directory not clean - {modified_count} modified, {untracked_count} untracked files")
+      except Exception as e:
+        logger.warning(f"Could not parse git status: {e}")
+        logger.info("Working directory not clean - stashing changes")
       logger.info(f"Stashing changes for task {self.id}")
       stash_ref = GitOperations.stash(f"Task {self.id}")
 
     try:
       # Execute Claude Code
-      logger.info(f"Executing task: {self.intent[:100]}")
-      result = SubprocessRunner.run(
-        command=["claude-code", "--non-interactive"], env={"CLAUDE_CODE_INTENT": self.intent}, timeout=300, check=False
-      )
+      logger.info(f"Executing Claude Code with intent: {self.intent[:100]}{'...' if len(self.intent) > 100 else ''}")
 
+      # Build command
+      command = ["claude", "--print", self.intent]
+      logger.debug(f"Command: {' '.join(command[:3])}... (intent length: {len(self.intent)} chars)")
+
+      # Log execution environment
+      import os
+
+      logger.debug(f"Working directory: {os.getcwd()}")
+      logger.debug(f"Python environment: {os.environ.get('VIRTUAL_ENV', 'No venv active')}")
+
+      start_time = datetime.now()
+      try:
+        # Execute with progress logging
+        logger.info("Starting Claude Code subprocess (timeout: 15 minutes)...")
+        result = SubprocessRunner.run(
+          command=command,
+          timeout=900,  # 15m
+          check=False,
+          capture_output=True,  # Ensure we capture both stdout and stderr
+        )
+
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(f"Claude Code execution completed in {elapsed:.1f} seconds")
+
+      except TimeoutError as e:
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.error(f"Claude Code execution timed out after {elapsed:.1f} seconds")
+        logger.error(f"Timeout details: {str(e)}")
+        raise RuntimeError(
+          f"Task timed out after {elapsed:.1f}s. Consider breaking down the intent into smaller steps."
+        )
+
+      except Exception as e:
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.error(f"Claude Code execution failed after {elapsed:.1f} seconds")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error details: {str(e)}")
+        raise RuntimeError(f"Failed to execute Claude Code: {type(e).__name__}: {str(e)}")
+
+      # Process results
       self.output = result.stdout
       self.success = result.success
 
-      # Commit changes if successful
-      if self.success and not GitOperations.is_clean():
-        GitOperations.stage_all()
-        self.after_commit = GitOperations.commit(
-          f"Task: {self.intent[:50]}", body=f"task_id: {self.id}\nsession_id: {self.session_id}"
-        )
-        logger.info(f"Committed changes: {self.after_commit[:8]}")
+      # Log execution results
+      logger.info(f"Claude Code exit status: {'SUCCESS' if self.success else 'FAILURE'}")
+      if result.stderr:
+        logger.warning(f"Claude Code stderr output: {result.stderr[:500]}{'...' if len(result.stderr) > 500 else ''}")
+
+      if self.output:
+        output_lines = self.output.strip().split("\n")
+        logger.debug(f"Claude Code output ({len(output_lines)} lines, {len(self.output)} chars total)")
+        if len(output_lines) <= 10:
+          logger.debug(f"Output:\n{self.output}")
+        else:
+          logger.debug(f"Output (first 5 lines):\n{chr(10).join(output_lines[:5])}")
+          logger.debug(f"... ({len(output_lines) - 10} lines omitted) ...")
+          logger.debug(f"Output (last 5 lines):\n{chr(10).join(output_lines[-5:])}")
       else:
+        logger.warning("Claude Code produced no output")
+
+      # Check for changes and commit if successful
+      if self.success:
+        if not GitOperations.is_clean():
+          # Get detailed change information by parsing git status
+          try:
+            status_output = GitOperations.get_output(["status", "--porcelain=v1"])
+            change_count = 0
+            change_types = {"staged": 0, "modified": 0, "untracked": 0}
+
+            for line in status_output.splitlines():
+              if line:
+                change_count += 1
+                status_code = line[:2]
+                if status_code[0] in "AMD":  # Staged changes
+                  change_types["staged"] += 1
+                if status_code[1] in "MD":  # Modified in working tree
+                  change_types["modified"] += 1
+                elif status_code == "??":  # Untracked
+                  change_types["untracked"] += 1
+
+            change_summary = ", ".join([f"{count} {type}" for type, count in change_types.items() if count > 0])
+            logger.debug(f"Change breakdown: {change_summary}")
+
+          except Exception as e:
+            logger.warning(f"Could not parse git status for details: {e}")
+            change_count = 1  # At least one change since not clean
+
+          logger.info(f"Detected {change_count} file changes after task execution")
+
+          # Stage and commit
+          GitOperations.stage_all()
+          logger.info("Staged all changes")
+
+          commit_msg = f"Task: {self.intent[:50]}{'...' if len(self.intent) > 50 else ''}"
+          commit_body = f"task_id: {self.id}\nsession_id: {self.session_id}\n\nIntent:\n{self.intent}"
+
+          self.after_commit = GitOperations.commit(commit_msg, body=commit_body)
+          logger.info(f"Created commit {self.after_commit[:8]}: {commit_msg}")
+        else:
+          logger.info("No changes detected after successful execution")
+          self.after_commit = self.before_commit
+      else:
+        logger.warning("Task failed - no changes will be committed")
         self.after_commit = self.before_commit
 
+        # Try to extract error information from output
+        if self.output and "error" in self.output.lower():
+          error_lines = [line for line in self.output.split("\n") if "error" in line.lower()]
+          if error_lines:
+            logger.error(f"Error indicators in output: {error_lines[:3]}")
+
     except Exception as e:
-      logger.error(f"Task execution failed: {e}")
+      logger.error(f"Task execution failed with exception: {type(e).__name__}")
+      logger.error(f"Exception details: {str(e)}")
+
+      # Add more context to the error
+      import traceback
+
+      logger.debug(f"Full traceback:\n{traceback.format_exc()}")
+
       self.success = False
-      self.output = str(e)
+      self.output = f"Error: {type(e).__name__}: {str(e)}"
+
+      # Try to capture any partial work
+      if not GitOperations.is_clean():
+        try:
+          status_output = GitOperations.get_output(["status", "--porcelain=v1", "--untracked-files=normal"])
+          change_lines = [line for line in status_output.splitlines() if line.strip()]
+          if change_lines:
+            logger.warning(f"Partial changes detected: {len(change_lines)} files affected")
+            # Log first few files for context
+            for line in change_lines[:5]:
+              file_path = line[3:]
+              status = line[:2]
+              logger.debug(f"  {status} {file_path}")
+            if len(change_lines) > 5:
+              logger.debug(f"  ... and {len(change_lines) - 5} more files")
+        except Exception as e:
+          logger.warning(f"Could not analyze partial changes: {e}")
 
     finally:
       # Restore stashed changes
       if stash_ref:
         try:
           GitOperations.run_command(["stash", "pop"])
-          logger.info("Restored stashed changes")
+          logger.info("Successfully restored stashed changes")
         except Exception as e:
-          logger.warning(f"Failed to restore stash: {e}")
+          logger.error(f"Failed to restore stash: {type(e).__name__}: {e}")
+          logger.error("Manual stash recovery may be needed")
+          logger.error(f"Stash reference: {stash_ref}")
+
+      # Final status log
+      logger.info(f"Task {self.id} completed: {'SUCCESS' if self.success else 'FAILURE'}")
+      logger.debug(f"Final git state: {GitOperations.get_current_commit()[:8]}")
 
     return self.success
 
@@ -305,7 +454,20 @@ class Session:
     if not path.exists():
       raise FileNotFoundError(f"Session {session_id} not found")
 
-    data = PythonConfigSerializer.read_config(path, "SESSION")
+    try:
+      data = PythonConfigSerializer.read_config(path, "SESSION")
+    except SyntaxError as e:
+      logger.error(f"Session file {path} has invalid Python syntax: {e}")
+      raise ValueError(f"Session {session_id} file is corrupted with syntax error at line {e.lineno}: {e.msg}") from e
+    except Exception as e:
+      logger.error(f"Failed to load session {session_id}: {type(e).__name__}: {e}")
+      raise ValueError(f"Session {session_id} could not be loaded: {type(e).__name__}: {str(e)}") from e
+
+    # Validate required fields
+    required_fields = ["id", "goal", "created_at", "start_commit"]
+    missing = [field for field in required_fields if field not in data]
+    if missing:
+      raise ValueError(f"Session {session_id} is missing required fields: {', '.join(missing)}")
 
     session = cls(goal=data["goal"], session_id=data["id"])
     session.created_at = data["created_at"]
@@ -325,6 +487,12 @@ class Session:
     for path in cache_dir.glob("*.py"):
       try:
         data = PythonConfigSerializer.read_config(path, "SESSION")
+
+        # Validate required fields
+        if not all(field in data for field in ["id", "goal", "created_at"]):
+          logger.warning(f"Skipping incomplete session file {path}")
+          continue
+
         sessions.append(
           {
             "id": data["id"],
@@ -333,8 +501,11 @@ class Session:
             "task_count": len(data.get("tasks", [])),
           }
         )
+      except SyntaxError as e:
+        logger.error(f"Skipping session {path} with syntax error at line {e.lineno}: {e.msg}")
+        continue
       except Exception as e:
-        logger.warning(f"Failed to load session from {path}: {e}")
+        logger.warning(f"Failed to load session from {path}: {type(e).__name__}: {e}")
         continue
 
     return sorted(sessions, key=lambda s: s["created_at"], reverse=True)

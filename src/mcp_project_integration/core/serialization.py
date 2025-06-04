@@ -59,8 +59,8 @@ class PythonConfigSerializer:
   be imported dynamically. Supports datetime objects, enums, and nested structures.
   """
 
-  @staticmethod
-  def serialize_value(value: Any) -> str:
+  @classmethod
+  def serialize_value(cls, value: Any) -> str:
     """Convert Python value to string representation
 
     Handles special types:
@@ -76,10 +76,25 @@ class PythonConfigSerializer:
       return f'Path("{value}")'
     elif isinstance(value, str):
       return repr(value)
-    elif isinstance(value, (list, dict, tuple)):
-      return repr(value)
+    elif isinstance(value, list):
+      # Recursively serialize list items
+      items = [cls.serialize_value(item) for item in value]
+      return f"[{', '.join(items)}]"
+    elif isinstance(value, tuple):
+      # Recursively serialize tuple items
+      items = [cls.serialize_value(item) for item in value]
+      return f"({', '.join(items)})"
+    elif isinstance(value, dict):
+      # Recursively serialize dict items
+      items = []
+      for k, v in value.items():
+        key_str = cls.serialize_value(k)
+        val_str = cls.serialize_value(v)
+        items.append(f"{key_str}: {val_str}")
+      return f"{{{', '.join(items)}}}"
     else:
-      return str(value)
+      # For other types, use repr
+      return repr(value)
 
   @classmethod
   def write_config(
