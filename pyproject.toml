@@ -15,6 +15,7 @@ build = [
     "build>=1.2.2.post1",
 ]
 dev = [
+    "mcp[cli]>=1.9.2",
     "mypy>=1.15.0",
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",

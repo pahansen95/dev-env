@@ -4,18 +4,21 @@ import sqlite3
 import json
 import contextlib
 from pathlib import Path
-from typing import Any
+from typing import Any, List, Optional
 from datetime import datetime
 
 
 class StateManager:
   """Manage environment state using SQLite"""
 
-  def __init__(self, state_dir: Path):
+  def __init__(self, state_dir: Optional[Path] = None):
+    if state_dir is None:
+      state_dir = Path.home() / ".dev-env"
     self.state_dir = state_dir
     self.state_dir.mkdir(parents=True, exist_ok=True)
     self.db_path = self.state_dir / "environments.db"
     self._init_db()
+    self.conn = None
 
   def _init_db(self):
     """Initialize database schema"""
@@ -45,6 +48,21 @@ class StateManager:
       except sqlite3.OperationalError:
         # Column already exists
         pass
+
+      # Create contexts table for context management
+      conn.execute("""
+                CREATE TABLE IF NOT EXISTS contexts (
+                    id TEXT PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL,
+                    path TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_used TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    UNIQUE(name, path)
+                )
+            """)
+      conn.execute("CREATE INDEX IF NOT EXISTS idx_contexts_name ON contexts(name)")
+      conn.execute("CREATE INDEX IF NOT EXISTS idx_contexts_path ON contexts(path)")
 
   @contextlib.contextmanager
   def _get_conn(self):
@@ -153,3 +171,99 @@ class StateManager:
           removed += 1
 
       return removed
+
+  def __enter__(self):
+    """Context manager entry for transactional operations."""
+    self.conn = sqlite3.connect(self.db_path)
+    self.conn.row_factory = sqlite3.Row
+    return self
+
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    """Context manager exit with automatic commit/rollback."""
+    if exc_type is None:
+      self.conn.commit()
+    else:
+      self.conn.rollback()
+    self.conn.close()
+    self.conn = None
+
+
+class ContextManager(StateManager):
+  """Manage context state for isolated development workspaces."""
+
+  def create_context(self, name: str, path: Path) -> "Context":
+    """Create a new context."""
+    from dev_env.context import Context
+
+    now = datetime.utcnow().isoformat()
+    context_id = Context.generate_id(name, path)
+
+    context = Context(
+      id=context_id,
+      name=name,
+      path=path,
+      created_at=now,
+      last_used=now,
+      state="active",
+    )
+
+    with self._get_conn() as conn:
+      conn.execute(
+        """
+                INSERT INTO contexts (id, name, path, created_at, last_used, state)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """,
+        (context.id, context.name, str(context.path.resolve()), context.created_at, context.last_used, context.state),
+      )
+
+    return context
+
+  def get_context(self, context_id: str) -> Optional["Context"]:
+    """Get context by ID."""
+    from dev_env.context import Context
+
+    with self._get_conn() as conn:
+      row = conn.execute("SELECT * FROM contexts WHERE id = ?", (context_id,)).fetchone()
+
+      if not row:
+        return None
+
+      return Context(
+        id=row["id"],
+        name=row["name"],
+        path=Path(row["path"]),
+        created_at=row["created_at"],
+        last_used=row["last_used"],
+        state=row["state"],
+      )
+
+  def list_contexts(self) -> List["Context"]:
+    """List all contexts."""
+    from dev_env.context import Context
+
+    with self._get_conn() as conn:
+      rows = conn.execute("SELECT * FROM contexts ORDER BY last_used DESC").fetchall()
+
+      return [
+        Context(
+          id=row["id"],
+          name=row["name"],
+          path=Path(row["path"]),
+          created_at=row["created_at"],
+          last_used=row["last_used"],
+          state=row["state"],
+        )
+        for row in rows
+      ]
+
+  def update_context(self, context: "Context") -> None:
+    """Update an existing context."""
+    with self._get_conn() as conn:
+      conn.execute(
+        """
+                UPDATE contexts
+                SET name = ?, path = ?, last_used = ?, state = ?
+                WHERE id = ?
+            """,
+        (context.name, str(context.path.resolve()), context.last_used, context.state, context.id),
+      )

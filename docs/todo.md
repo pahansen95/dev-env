@@ -1,213 +1,341 @@
-# Build & Release System Implementation Plan
+# Context & CLI Implementation Plan
 
 ## Overview
 
-This plan describes implementing a build and release system for the dev-env project. The system consists of shell scripts that build Python packages and validate releases through git tags.
+This plan implements a context-based development environment system with porcelain (user-friendly) and plumbing (low-level) CLI commands. The implementation follows a phased approach to ensure incremental delivery and testing.
 
-## System Architecture
+## Phase 1: Context Foundation (Week 1)
 
-The build system provides two primary functions:
-- **Package Building**: Creates distributable Python packages (wheel and source)
-- **Release Validation**: Ensures package quality before git tag creation
+### Objective
+Implement the core context system for managing isolated development workspaces.
 
-Releases occur through git tags only. No package publishing to PyPI is required.
+### Deliverables
 
-## Prerequisites
+#### 1.1 Context Data Model
+Create `src/dev_env/context.py`:
 
-- Python 3.13+ installed
-- Git repository with existing helpers/utils.sh
-- Project structure with pyproject.toml and src/dev_env/__init__.py
-- Basic shell scripting knowledge
-
-## Implementation Tasks
-
-### Task 1: Create Build Script
-
-**File**: `helpers/build-package.sh`
-
-**Purpose**: Build Python wheel and source distribution packages
-
-**Requirements**:
-1. Source helpers/utils.sh for common functions
-2. Create isolated build environment using Python venv
-3. Install only official build tools: `pip install build`
-4. Clean previous build artifacts (dist/, build/, *.egg-info)
-5. Execute `python -m build` to create packages
-6. Generate SHA256 checksums for artifacts
-7. Display package contents summary
-
-**Acceptance Criteria**:
-- Script runs without external dependencies
-- Creates both .whl and .tar.gz in dist/
-- Generates dist/checksums.txt with SHA256 hashes
-- Exits with code 0 on success, non-zero on failure
-- Provides clear progress messages using log functions
-
-**Exit Codes**:
-- 0: Success
-- 1: Python/git not available
-- 2: Build environment setup failed
-- 3: Package build failed
-
-### Task 2: Create Validation Script
-
-**File**: `helpers/validate-package.sh`
-
-**Purpose**: Validate package readiness for release
-
-**Requirements**:
-1. Source helpers/utils.sh for common functions
-2. Support two modes:
-   - Standard mode: Basic package validation
-   - Tag mode (--tag-mode flag): Additional git tag checks
-3. Perform validation checks:
-   - Version consistency between __init__.py and pyproject.toml
-   - No uncommitted git changes
-   - Package builds successfully (calls build-package.sh)
-   - Test installation in fresh venv
-   - CLI command `dev-env --version` works
-   - Python import test: `python -c "import dev_env"`
-4. In tag mode, additionally verify:
-   - Current commit has semver tag (v*.*.*)
-   - Tag matches package version
-
-**Acceptance Criteria**:
-- Validates all aspects without manual intervention
-- Clear error messages indicating what failed
-- Cleans up test environments after validation
-- Returns appropriate exit codes for each failure type
-
-**Exit Codes**:
-- 0: All validations passed
-- 10: Version mismatch
-- 11: Uncommitted changes
-- 12: Build failed
-- 13: Installation failed
-- 14: Import failed
-- 15: CLI test failed
-- 16: Tag validation failed
-
-### Task 3: Extend Utilities
-
-**File**: `helpers/utils.sh` (additions)
-
-**New Functions Required**:
-
-```bash
-# Extract version from Python file
-get_python_version() {
-    local file="$1"
-    # Extract __version__ = "x.y.z"
-}
-
-# Extract version from pyproject.toml
-get_pyproject_version() {
-    # Extract version = "x.y.z"
-}
-
-# Check if current commit has tag
-get_current_tag() {
-    # Return tag if exists, empty otherwise
-}
-
-# Validate semver format
-is_valid_semver() {
-    local version="$1"
-    # Check format: vX.Y.Z
-}
-
-# Calculate SHA256 checksum
-calculate_checksum() {
-    local file="$1"
-    # Use Python: python -c "import hashlib..."
-}
+```python
+@dataclass
+class Context:
+    """Represents an isolated development workspace"""
+    id: str          # SHA-256 hash of name + path
+    name: str        # Human-readable identifier
+    path: Path       # Filesystem location
+    created_at: str  # ISO timestamp
+    last_used: str   # ISO timestamp
+    state: str       # active|suspended|archived
 ```
 
-### Task 4: Configure Pre-commit Hook
+#### 1.2 Context Resolution
+Implement `src/dev_env/context_resolver.py`:
 
-**File**: `.pre-commit-config.yaml` (modify existing)
-
-**Addition Required**:
-```yaml
-  - id: validate-release
-    name: Validate release package
-    entry: ./helpers/validate-package.sh
-    language: script
-    pass_filenames: false
-    stages: [manual]
-    verbose: true
+```python
+class ContextResolver:
+    def resolve(self, name: Optional[str] = None) -> Optional[Context]:
+        """
+        Resolution order:
+        1. If name provided, check registry
+        2. Walk up from cwd looking for .dev-env/
+        3. Return None if not found
+        """
 ```
 
-**Git Hook Setup**:
-Create `.git/hooks/pre-push` to run validation on tag pushes:
-```bash
-#!/bin/bash
-# Check if pushing a semver tag
-# If yes, run validation in tag mode
+#### 1.3 Context Storage
+Extend `src/dev_env/state.py`:
+
+```python
+class ContextManager(StateManager):
+    def create_context(self, name: str, path: Path) -> Context
+    def get_context(self, context_id: str) -> Optional[Context]
+    def list_contexts(self) -> List[Context]
+    def update_context(self, context: Context) -> None
 ```
 
-### Task 5: Create Make Targets (Optional)
+### Implementation Notes
+- Use SQLite for context registry (extend existing state.db)
+- Context ID = SHA-256(name + absolute_path)
+- Store contexts table with indexed lookups
 
-**File**: `Makefile` (create if desired)
+### Testing Requirements
+- Unit tests for context creation, resolution, and storage
+- Test hierarchical directory resolution
+- Test registry persistence
 
-```makefile
-.PHONY: build validate release
+## Phase 2: Plumbing Commands (Week 2)
 
-build:
-	./helpers/build-package.sh
+### Objective
+Implement low-level commands that output JSON and compose well.
 
-validate:
-	./helpers/validate-package.sh
+### Deliverables
 
-release:
-	@echo "To release: git tag vX.Y.Z && git push origin vX.Y.Z"
+#### 2.1 Base Plumbing Command
+Create `src/dev_env/cli_plumbing.py`:
+
+```python
+class PlumbingCommand:
+    """Base class for all plumbing commands"""
+    
+    def execute(self, args) -> dict:
+        """Returns JSON-serializable dict"""
+        raise NotImplementedError
+    
+    def output(self, result: dict) -> None:
+        """Outputs JSON to stdout"""
+        print(json.dumps(result))
 ```
 
-## Testing Procedures
+#### 2.2 Context Plumbing Commands
+Implement in `src/dev_env/commands/plumbing/`:
 
-### Test Build Script
-1. Run `./helpers/build-package.sh`
-2. Verify dist/ contains .whl and .tar.gz files
-3. Verify checksums.txt exists and is accurate
-4. Run again and verify cleanup works
+- `context_create.py` - Creates new context
+- `context_resolve.py` - Resolves context from path/name
+- `context_list.py` - Lists all contexts
 
-### Test Validation Script
-1. Create intentional version mismatch and verify detection
-2. Add uncommitted changes and verify detection
-3. Run with clean working directory and verify success
-4. Test tag mode with and without valid tags
+#### 2.3 Environment Plumbing Commands
+Implement core lifecycle commands:
 
-### Integration Test
-1. Make code change
-2. Update version in __init__.py
-3. Commit changes
-4. Run validation script
-5. Create git tag
-6. Verify pre-commit hook runs
+- `env_create.py` - Creates container from config
+- `env_start.py` - Starts existing container
+- `env_stop.py` - Stops running container
+- `env_status.py` - Returns current state
 
-## Implementation Order
+#### 2.4 Execution Plumbing
+- `exec.py` - Executes command in container
+- `attach.py` - Attaches to container TTY
 
-1. Extend utils.sh with new functions (30 minutes)
-2. Implement build-package.sh (45 minutes)
-3. Implement validate-package.sh (60 minutes)
-4. Configure pre-commit hooks (15 minutes)
-5. Test all components (30 minutes)
+### Implementation Guidelines
 
-Total estimated time: 3 hours
+Command Structure:
+```python
+# commands/plumbing/context_resolve.py
+class ContextResolveCommand(PlumbingCommand):
+    def execute(self, args):
+        resolver = ContextResolver()
+        context = resolver.resolve(args.name)
+        
+        if not context:
+            return {"error": "Context not found", "code": "CONTEXT_NOT_FOUND"}
+        
+        return {
+            "id": context.id,
+            "name": context.name,
+            "path": str(context.path)
+        }
+```
+
+CLI Integration:
+```python
+# Add to cli.py
+plumbing_parser = subparsers.add_parser('context-resolve')
+plumbing_parser.set_defaults(func=lambda args: ContextResolveCommand().execute(args))
+```
+
+### Testing Requirements
+- Test JSON output format
+- Test error conditions
+- Test command composition with pipes
+
+## Phase 3: Porcelain Commands (Week 3)
+
+### Objective
+Implement user-friendly commands that orchestrate plumbing commands.
+
+### Deliverables
+
+#### 3.1 Work Command
+Create `src/dev_env/commands/porcelain/work.py`:
+
+```python
+class WorkCommand:
+    def execute(self, args):
+        # 1. Resolve or create context
+        # 2. Load or generate config
+        # 3. Create or start environment
+        # 4. Show progress and status
+```
+
+#### 3.2 Core Porcelain Commands
+- `stop.py` - Suspends current/named environment
+- `run.py` - Executes command in current context
+- `status.py` - Shows human-readable status
+- `shell.py` - Opens interactive shell
+
+### Implementation Pattern
+
+```python
+# commands/porcelain/work.py
+class WorkCommand:
+    def execute(self, args):
+        # Step 1: Context resolution
+        context = self._resolve_context(args.name)
+        if not context:
+            context = self._create_context()
+        
+        # Step 2: Configuration
+        config = self._load_config(context)
+        if not config:
+            config = self._setup_wizard()
+        
+        # Step 3: Environment management
+        status = self._get_status(context)
+        if status['state'] == 'stopped':
+            self._start_environment(context)
+        elif status['state'] == 'notfound':
+            self._create_environment(context, config)
+        
+        # Step 4: User feedback
+        self._show_ready_message(context)
+    
+    def _run_plumbing(self, command: str, *args) -> dict:
+        """Helper to run plumbing commands"""
+        # Implementation detail
+```
+
+### Progress Feedback
+Use `rich` library patterns (without importing):
+
+```python
+def _show_progress(self, message: str, done: bool = False):
+    symbol = "✓" if done else "●"
+    print(f"{symbol} {message}")
+```
+
+### Testing Requirements
+- Integration tests for full workflows
+- Mock plumbing commands for unit tests
+- Test user feedback and error messages
+
+## Phase 4: Configuration & Setup Wizard (Week 4)
+
+### Objective
+Implement configuration detection and interactive setup.
+
+### Deliverables
+
+#### 4.1 Configuration Detection
+Create `src/dev_env/config_detector.py`:
+
+```python
+class ConfigDetector:
+    def detect(self, path: Path) -> Optional[dict]:
+        """
+        Detection order:
+        1. .devcontainer/devcontainer.json
+        2. dev-env.yaml
+        3. docker-compose.yaml
+        4. Dockerfile
+        5. Language-specific files (package.json, requirements.txt)
+        """
+```
+
+#### 4.2 Setup Wizard
+Create `src/dev_env/setup_wizard.py`:
+
+```python
+class SetupWizard:
+    def run(self, context: Context) -> dict:
+        """Interactive configuration generation"""
+        # 1. Detect project type
+        # 2. Ask minimal questions
+        # 3. Generate configuration
+        # 4. Save to context path
+```
+
+### Testing Requirements
+- Test detection for various project types
+- Test wizard flow with mocked input
+- Test configuration generation
+
+## Phase 5: Integration & Polish (Week 5)
+
+### Objective
+Integrate all components and add polish features.
+
+### Deliverables
+
+#### 5.1 State Preservation
+- Implement filesystem overlay tracking
+- Add volume state management
+- Create snapshot/restore functionality
+
+#### 5.2 Error Handling
+Implement consistent error handling:
+
+```python
+class DevEnvError(Exception):
+    def to_json(self) -> dict:
+        return {
+            "error": self.message,
+            "code": self.code,
+            "remediation": self.remediation
+        }
+```
+
+#### 5.3 Shell Completion
+Update `src/dev_env/completion.py`:
+- Add context name completion
+- Add command suggestions
+- Support new command structure
+
+### Testing Requirements
+- End-to-end workflow tests
+- Performance benchmarks
+- User acceptance testing
+
+## Implementation Guidelines
+
+### Code Organization
+```
+src/dev_env/
+├── context.py              # Context data model
+├── context_resolver.py     # Resolution logic
+├── config_detector.py      # Configuration detection
+├── setup_wizard.py         # Interactive setup
+├── commands/
+│   ├── porcelain/         # User-facing commands
+│   │   ├── work.py
+│   │   ├── stop.py
+│   │   ├── run.py
+│   │   ├── status.py
+│   │   └── shell.py
+│   └── plumbing/          # Low-level commands
+│       ├── context_*.py
+│       ├── env_*.py
+│       └── exec.py
+└── cli.py                  # Updated CLI entry point
+```
+
+### Testing Strategy
+1. Unit tests for each module
+2. Integration tests for command workflows
+3. Mock Docker operations for speed
+4. Real Docker tests marked as `@pytest.mark.slow`
+
+### Migration Path
+1. Keep existing commands working
+2. Add deprecation warnings after Phase 3
+3. Update documentation incrementally
+4. Provide migration guide
 
 ## Success Criteria
 
-The implementation is complete when:
-- Developers can run `./helpers/build-package.sh` to create packages
-- Running `./helpers/validate-package.sh` catches all quality issues
-- Git tags trigger automatic validation
-- No external dependencies beyond Python standard tools
-- All scripts follow existing project patterns from utils.sh
+### Functionality
+- [ ] Context resolution works from any subdirectory
+- [ ] Porcelain commands complete in <5 seconds
+- [ ] Plumbing commands output valid JSON
+- [ ] Setup wizard generates working configs
+- [ ] State persists between sessions
 
-## Notes for Implementers
+### User Experience
+- [ ] Single command to start working
+- [ ] Clear progress feedback
+- [ ] Actionable error messages
+- [ ] Intuitive command structure
+- [ ] Fast context switching
 
-- Use existing logging functions from utils.sh (log_info, log_error, etc.)
-- Follow existing script patterns for consistency
-- Test on both Linux and macOS if possible
-- Keep scripts simple and focused on single responsibility
-- Document any assumptions in script comments
+### Code Quality
+- [ ] 90%+ test coverage
+- [ ] Type hints throughout
+- [ ] Comprehensive docstrings
+- [ ] No external dependencies
+- [ ] Clean separation of concerns
