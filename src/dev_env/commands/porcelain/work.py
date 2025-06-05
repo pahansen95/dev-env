@@ -3,7 +3,7 @@
 import json
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 from dev_env.commands.plumbing.context_create import ContextCreateCommand
 from dev_env.commands.plumbing.context_resolve import ContextResolveCommand
