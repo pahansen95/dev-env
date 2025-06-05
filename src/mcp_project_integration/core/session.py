@@ -178,6 +178,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 import logging
+import os
 
 from .serialization import PythonConfigSerializer
 from .utils import GitOperations, SubprocessRunner
@@ -350,9 +351,6 @@ class Task:
       ]
 
       logger.debug(f"Command: {' '.join(command[:7])}... (intent length: {len(self.intent)} chars)")
-
-      # Log execution environment
-      import os
 
       logger.debug(f"Working directory: {os.getcwd()}")
       logger.debug(f"Python environment: {os.environ.get('VIRTUAL_ENV', 'No venv active')}")
