@@ -248,9 +248,10 @@ class TestStatusCommandFormatting:
     }
 
     command = StatusCommand()
+    command._context = {"name": "test"}
 
     # Should format error messages appropriately
-    with patch("builtins.print") as mock_print:
+    with patch("builtins.print"):
       command._show_current_status()
 
       # Verify error formatting was handled

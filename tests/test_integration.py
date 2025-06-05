@@ -251,11 +251,10 @@ volumes:
       create_args = Namespace(context="test-env")
 
       # Should handle security validation
-      with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+      with patch("sys.stdout", new_callable=io.StringIO):
         env_create.run(create_args)
 
         # Should output error about security violation
-        output = mock_stdout.getvalue()
         # In a real implementation, this would contain security error
 
   @patch("dev_env.commands.plumbing.env_create.DockerClient")

@@ -24,16 +24,11 @@ class TestWorkCommand:
   @patch("dev_env.commands.porcelain.work.WorkCommand._create_context")
   def test_work_context_resolution(self, mock_create, mock_resolve):
     """Test work command context resolution logic"""
-    from dev_env.commands.porcelain.work import WorkCommand
 
     # Test context not found - should create new
     mock_resolve.return_value = None
     mock_create.return_value = {"id": "test", "name": "test", "path": "/test"}
 
-    command = WorkCommand()
-    args = Namespace(name=None)
-
-    # This would be called within execute(), testing the logic flow
     context = mock_resolve(None)
     if not context:
       context = mock_create()
@@ -74,7 +69,6 @@ class TestStopCommand:
   @patch("dev_env.commands.plumbing.env_stop.EnvStopCommand")
   def test_stop_context_resolution_and_execution(self, mock_env_stop_class, mock_resolve_class):
     """Test stop command resolves context and stops environment"""
-    from dev_env.commands.porcelain.stop import StopCommand
 
     # Mock context resolution
     mock_resolve = MagicMock()
@@ -84,10 +78,6 @@ class TestStopCommand:
     mock_env_stop = MagicMock()
     mock_env_stop_class.return_value = mock_env_stop
 
-    command = StopCommand()
-    args = Namespace(name="test-context")
-
-    # Test the command pattern - this would be part of execute()
     mock_resolve_class.assert_not_called()  # Until execute() is actually called
 
 
@@ -153,8 +143,6 @@ class TestRunCommand:
     mock_exec_class.return_value = mock_exec
 
     command = RunCommand()
-    args = Namespace(command=["echo", "hello"])
-
     # Verify command structure exists
     assert hasattr(command, "execute")
 
@@ -188,8 +176,6 @@ class TestShellCommand:
     mock_attach_class.return_value = mock_attach
 
     command = ShellCommand()
-    args = Namespace()
-
     # Verify command structure exists
     assert hasattr(command, "execute")
 
@@ -312,8 +298,6 @@ class TestStateManagement:
     mock_state_class.return_value = mock_state
 
     command = ContextCreateCommand()
-    args = Namespace(name="test", path="/test")
-
     # This would be tested at a higher integration level
     # Here we verify the command structure exists
     assert hasattr(command, "run")
@@ -328,7 +312,5 @@ class TestStateManagement:
     mock_state_class.return_value = mock_state
 
     command = EnvStatusCommand()
-    args = Namespace(context="test")
-
     # Verify command structure for state integration
     assert hasattr(command, "run")

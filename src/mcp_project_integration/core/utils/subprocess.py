@@ -5,7 +5,9 @@ and proper resource cleanup for external command execution.
 """
 
 import asyncio
+import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Optional, Dict, List, Callable
 import logging
@@ -250,8 +252,3 @@ class SubprocessRunner:
     except Exception as e:
       logger.debug(f"Failed to get version for {command}: {e}")
       return None
-
-
-# Missing imports
-import os
-import time

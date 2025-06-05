@@ -57,7 +57,6 @@ class TestContextCreateCommand:
     test_dir.mkdir()
 
     # Use isolated state directory
-    state_dir = tmp_path / "state"
     with patch("dev_env.state.Path.home", return_value=tmp_path):
       args = Namespace(name="test", path=str(test_dir))
       cmd = ContextCreateCommand()
@@ -117,7 +116,6 @@ class TestContextResolveCommand:
   def test_resolve_by_name(self, tmp_path, capsys):
     """Test resolving context by name."""
     # Use isolated state directory for this test
-    state_dir = tmp_path / "state"
 
     # Create a context first
     test_dir = tmp_path / "project"

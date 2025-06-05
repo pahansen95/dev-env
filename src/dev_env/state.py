@@ -4,8 +4,11 @@ import sqlite3
 import json
 import contextlib
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, TYPE_CHECKING
 from datetime import datetime
+
+if TYPE_CHECKING:
+  from dev_env.context import Context
 
 
 class StateManager:

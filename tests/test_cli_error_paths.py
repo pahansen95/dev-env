@@ -246,10 +246,10 @@ class TestPlumbingCommandErrorPaths:
     mock_context_manager_class.return_value = mock_context_manager
 
     command = ContextCreateCommand()
-    args = Namespace(name="existing-context", path="/test/path")
+    args = Namespace(name="test", path="/test/path")
 
-    # Should handle duplicate name error
-    with patch("sys.stdout") as mock_stdout:
+    # Should handle context creation failure
+    with patch("sys.stdout"):
       command.run(args)
       # Should output error in JSON format
 
@@ -273,7 +273,7 @@ class TestPlumbingCommandErrorPaths:
     args = Namespace(context="test-context")
 
     # Should handle image pull failure
-    with patch("sys.stdout") as mock_stdout:
+    with patch("sys.stdout"):
       command.run(args)
       # Should output error in JSON format
 
@@ -297,7 +297,7 @@ class TestPlumbingCommandErrorPaths:
     args = Namespace(context="test-context")
 
     # Should handle missing container gracefully
-    with patch("sys.stdout") as mock_stdout:
+    with patch("sys.stdout"):
       command.run(args)
       # Should output appropriate status
 
@@ -363,10 +363,8 @@ class TestResourceCleanupErrorPaths:
     command = EnvStopCommand()
 
     # Should handle volume cleanup failures gracefully
-    with patch("sys.stdout") as mock_stdout:
-      # This would be tested with proper state setup
-      # Verifying the command structure exists
-      assert hasattr(command, "run")
+    # Verifying the command structure exists
+    assert hasattr(command, "run")
 
   @patch("dev_env.commands.plumbing.env_stop.DockerClient")
   def test_stop_network_cleanup_failure(self, mock_docker_class):
@@ -383,7 +381,5 @@ class TestResourceCleanupErrorPaths:
     command = EnvStopCommand()
 
     # Should handle network cleanup failures gracefully
-    with patch("sys.stdout") as mock_stdout:
-      # This would be tested with proper state setup
-      # Verifying the command structure exists
-      assert hasattr(command, "run")
+    # Verifying the command structure exists
+    assert hasattr(command, "run")

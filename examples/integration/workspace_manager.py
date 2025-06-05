@@ -128,12 +128,12 @@ class DevEnvironmentManager:
     print(f"Pulling image: {base_image}")
     try:
       self.docker.pull_image(base_image)
-    except Exception as e:
+    except Exception:
       # Check if image exists locally
       try:
         self.docker._request("GET", f"/images/{base_image}/json")
         print(f"Using local image: {base_image}")
-      except:
+      except Exception as e:
         raise RuntimeError(f"Failed to pull image: {e}")
 
     # Create volumes
@@ -276,7 +276,7 @@ class DevEnvironmentManager:
     try:
       container = self.docker.get_container(env_state["container_id"])
       status = container["State"]["Status"]
-    except:
+    except Exception:
       status = "not found"
 
     return {

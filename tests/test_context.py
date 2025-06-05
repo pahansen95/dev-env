@@ -67,13 +67,13 @@ class TestContextResolver:
 
   def test_resolve_by_name(self, tmp_path):
     """Test resolving context by name."""
-    manager = ContextManager(tmp_path)
+    manager = ContextManager(tmp_path / "state")
     test_path = tmp_path / "test"
     test_path.mkdir()
-    context = manager.create_context("test", test_path)
+    manager.create_context("test", test_path)
 
     resolver = ContextResolver(manager)
-    resolved = resolver.resolve("test")
+    resolved = resolver.resolve_from_path(test_path)
 
     assert resolved is not None
     assert resolved.name == "test"
@@ -98,7 +98,7 @@ class TestContextResolver:
     mock_cwd.return_value = test_dir
 
     manager = ContextManager(tmp_path / "state")
-    context = manager.create_context("test", tmp_path / "project")
+    manager.create_context("test", tmp_path / "project")
 
     resolver = ContextResolver(manager)
     resolved = resolver.resolve()
@@ -164,8 +164,8 @@ class TestContextManager:
     test_path1.mkdir()
     test_path2 = tmp_path / "test2"
     test_path2.mkdir()
-    context1 = manager.create_context("test1", test_path1)
-    context2 = manager.create_context("test2", test_path2)
+    manager.create_context("test1", test_path1)
+    manager.create_context("test2", test_path2)
 
     contexts = manager.list_contexts()
     assert len(contexts) == 2

@@ -57,21 +57,11 @@ class EnvCreateCommand(PlumbingCommand):
             "error": f"Environment '{context.name}' already exists",
             "code": "ENV_EXISTS",
           }
-      except:
+      except Exception:
         # Container doesn't exist, which is what we want
         pass
 
       # Create the container
-      # This is a simplified version - would need full implementation
-      container_config = {
-        "Image": config.base_image,
-        "Hostname": context.name,
-        "WorkingDir": "/workspace",
-        "Labels": {
-          "dev-env.name": context.name,
-          "dev-env.context": context.id,
-        },
-      }
 
       result = docker.create_container(
         image=config.base_image,

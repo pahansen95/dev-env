@@ -44,7 +44,7 @@ class EnvStatusCommand(PlumbingCommand):
         container_info = docker.inspect_container(container_id)
         container_exists = True
         container_running = container_info.get("State", {}).get("Running", False)
-      except:
+      except Exception:
         container_exists = False
         container_running = False
 

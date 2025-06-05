@@ -50,7 +50,7 @@ def main():
   status_parser = subparsers.add_parser("status", help="Show environment status")
   status_parser.add_argument("--all", action="store_true", help="Show all environments")
 
-  shell_parser = subparsers.add_parser("shell", help="Open interactive shell")
+  subparsers.add_parser("shell", help="Open interactive shell")
 
   # Plumbing commands
   context_create_parser = subparsers.add_parser("context-create", help="Create a new context")
@@ -60,7 +60,7 @@ def main():
   context_resolve_parser = subparsers.add_parser("context-resolve", help="Resolve context from path or name")
   context_resolve_parser.add_argument("--name", help="Context name to resolve")
 
-  context_list_parser = subparsers.add_parser("context-list", help="List all contexts")
+  subparsers.add_parser("context-list", help="List all contexts")
 
   env_create_parser = subparsers.add_parser("env-create", help="Create environment from config")
   env_create_parser.add_argument("--context", help="Context name (default: resolve from current directory)")

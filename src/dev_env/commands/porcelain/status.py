@@ -152,7 +152,7 @@ class StatusCommand:
         return f"{minutes} minutes ago"
       else:
         return "Just now"
-    except:
+    except (ValueError, OSError):
       return timestamp
 
   def _run_plumbing_command(self, command, args) -> dict:

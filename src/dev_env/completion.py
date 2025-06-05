@@ -171,7 +171,7 @@ _dev_env() {
 _dev_env_commands() {
     local commands=(
         'work:Start or resume development session'
-        'stop:Stop development environment'  
+        'stop:Stop development environment'
         'run:Execute command in current environment'
         'status:Show environment status'
         'shell:Open interactive shell'
@@ -297,13 +297,10 @@ def cmd_completion(args: argparse.Namespace) -> int:
 
   if shell == "bash":
     content = generate_bash_completion()
-    filename = "dev-env-completion.bash"
   elif shell == "zsh":
     content = generate_zsh_completion()
-    filename = "_dev-env"
   elif shell == "fish":
     content = generate_fish_completion()
-    filename = "dev-env.fish"
   else:
     print(f"Unsupported shell: {shell}")
     return 1
