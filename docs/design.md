@@ -1,376 +1,444 @@
-# Development Environments
+# Development Environment Architecture
 
 ## Vision
 
-The Development Environment system provides developers with rapidly deployable, isolated workspaces that maintain consistency across projects while preserving individual workflow preferences. This tool eliminates environment configuration overhead, enabling developers to focus on writing code rather than managing infrastructure.
+The Development Environment system provides context-aware, isolated development workspaces that eliminate configuration overhead while maintaining consistency across projects. This architecture enables developers to focus on building software rather than managing infrastructure through automatic workspace detection and intelligent environment lifecycle management.
 
 ### Core Goals
 
-1. **Instant Productivity**: Create fully-configured development environments in under 30 seconds
-2. **Zero Configuration Drift**: Ensure environments remain consistent and reproducible
-3. **Secure by Default**: Handle credentials and secrets without compromising security
-4. **Minimal Dependencies**: Require only Docker and Python on the host system
-5. **Developer-Centric**: Prioritize developer experience and workflow integration
+1. **Context-Aware Operation**: Automatically detect and manage project-specific development environments
+2. **Zero Configuration Overhead**: Generate configurations through interactive setup wizards
+3. **Rapid Environment Creation**: Deploy fully-configured workspaces in under 30 seconds
+4. **Persistent State Management**: Maintain workspace data across environment lifecycles
+5. **Minimal Dependencies**: Require only Docker and Python on the host system
 
 ## System Architecture
 
-The architecture consists of three primary layers that work together to provide a seamless development environment experience.
+The architecture implements a three-layer design that provides context-aware development environment management through automatic detection, intelligent configuration, and seamless Docker integration.
+
+### Context Management Layer
+
+The Context Management Layer provides automatic workspace detection and lifecycle management. This layer eliminates manual environment tracking by implementing intelligent project structure analysis and persistent context storage.
+
+**Key Components:**
+- Context detection through directory traversal
+- SQLite-based context persistence
+- Automatic workspace association
+- State management across sessions
+
+**Design Principles:**
+- Automatic context resolution
+- Minimal user intervention requirements
+- Persistent workspace tracking
+- Hierarchical context organization
 
 ### Configuration Layer
 
-The Configuration Layer uses Python-based configuration files to define development environments. This approach provides type safety, dynamic composition, and eliminates parsing complexities.
+The Configuration Layer uses YAML-based configuration files combined with interactive setup wizards. This approach provides human-readable configuration while eliminating complex setup procedures through guided configuration generation.
 
 **Key Components:**
-- Environment dataclasses with validation
-- Template functions for common patterns
-- Dynamic configuration based on runtime context
-- Configuration discovery and loading mechanisms
+- YAML configuration parsing and validation
+- Interactive setup wizard system
+- Project type detection mechanisms
+- Template-based configuration generation
 
 **Design Principles:**
-- Configuration as executable code
-- Type-safe environment definitions
-- Composable and extensible patterns
-- Zero parsing overhead
+- Human-readable configuration format
+- Guided configuration creation
+- Intelligent default generation
+- Extensible template system
 
-### Management Layer
+### Environment Management Layer
 
-The Management Layer orchestrates Docker containers and manages persistent state. It handles the complete lifecycle of development environments while maintaining data integrity and security.
+The Environment Management Layer orchestrates Docker container lifecycles while maintaining data persistence and security. It provides direct Docker API integration with comprehensive resource management and cleanup procedures.
 
 **Key Components:**
-- Container lifecycle management
+- Container lifecycle orchestration
 - Volume persistence strategies
-- State tracking and drift detection
-- Credential injection mechanisms
+- Network isolation management
+- Resource cleanup automation
 
 **Design Principles:**
-- Direct Docker API usage
-- Minimal abstraction layers
-- Fail-fast error handling
-- Resource cleanup guarantees
-
-### Interface Layer
-
-The Interface Layer provides a simple command-line interface for common operations. It abstracts complex Docker operations into intuitive developer commands.
-
-**Key Components:**
-- Subcommand-based CLI structure
-- Configuration file discovery
-- Error reporting and recovery
-- Status and monitoring commands
-
-**Design Principles:**
-- Intuitive command structure
-- Helpful error messages
-- Progressive disclosure of complexity
-- Consistent command patterns
+- Direct Docker API utilization
+- Automated resource management
+- Fail-safe cleanup procedures
+- Security-first design approach
 
 ## Core Components
 
+### Context Resolution System
+
+Contexts represent isolated development workspaces with automatic detection and lifecycle management:
+
+```python
+@dataclass
+class Context:
+    id: str              # SHA-256 hash identifier
+    name: str            # Human-readable workspace name
+    path: Path           # Filesystem location
+    created_at: str      # ISO timestamp
+    last_used: str       # Activity tracking
+    state: str           # Lifecycle state management
+```
+
+**Context Resolution Process:**
+1. Directory tree traversal for existing contexts
+2. `.dev-env/` marker file detection
+3. Context registry lookup by path
+4. Interactive context creation for new projects
+
 ### Environment Configuration
 
-Environments are defined using Python dataclasses that provide structure and validation:
+Environment definitions use YAML format for clarity and maintainability:
 
-```python
-@dataclass
-class Environment:
-    name: str                    # Unique environment identifier
-    image: str                   # Docker base image
-    git: GitConfig              # Repository configuration
-    ssh: SSHConfig = None       # SSH server settings
-    volumes: List[VolumeMount]  # Persistent and bind mounts
-    env: Dict[str, str]         # Environment variables
-    memory: str = "2g"          # Resource constraints
-    cpus: float = 2.0           # CPU allocation
+```yaml
+base_image: python:3.13-slim
+ports:
+  - container: 8000
+    host: 8000
+volumes:
+  - source: .
+    target: /workspace
+  - source: pip-cache
+    target: /root/.cache/pip
+    type: named
+environment:
+  PYTHONPATH: /workspace
+  DEBUG: "true"
+working_directory: /workspace
 ```
 
-This structure enables:
-- Clear environment specification
-- Default value management
-- Type checking at configuration time
-- Easy extension for new features
+**Configuration Features:**
+- Required field validation
+- Default value application
+- Type-safe parsing
+- Template inheritance support
 
-### Container Management
+### Command Architecture
 
-The container management system handles the complete lifecycle of development containers:
+The command structure implements a porcelain/plumbing design pattern that separates user-friendly operations from low-level functionality:
 
-```python
-class EnvironmentManager:
-    def create(name: str) -> None:
-        """Initialize new environment with git clone and SSH setup"""
-        
-    def start(name: str) -> None:
-        """Start existing environment container"""
-        
-    def stop(name: str) -> None:
-        """Gracefully stop running environment"""
-        
-    def destroy(name: str, keep_volumes: bool) -> None:
-        """Remove environment with optional data preservation"""
-```
+**Porcelain Commands (User Interface):**
+- `work` - Context-aware environment startup
+- `stop` - Intelligent environment termination
+- `status` - Rich environment status display
+- `shell` - Interactive environment access
+- `run` - Command execution within environments
 
-**Container Initialization Process:**
-1. Create container from specified image
-2. Configure SSH server with authorized keys
-3. Clone git repository into workspace
-4. Apply environment-specific configurations
-5. Start SSH service for remote access
+**Plumbing Commands (Low-Level Operations):**
+- `context-create` - Direct context creation
+- `context-resolve` - Context resolution testing
+- `env-create` - Container creation operations
+- `env-start` - Container startup procedures
+- `env-stop` - Container termination handling
 
-### State Persistence
+### State Persistence Architecture
 
-State management separates persistent data from ephemeral container state:
+State management separates context tracking from environment data through specialized storage mechanisms:
 
-**Persistent State:**
-- Workspace files (source code, build artifacts)
-- Development databases
-- Package caches
-- User configurations
+**Context State (SQLite):**
+- Context metadata and lifecycle tracking
+- Workspace association mappings
+- Activity history maintenance
+- Cross-session state preservation
 
-**Ephemeral State:**
-- SSH host keys
-- Running processes
-- Temporary files
-- Session state
+**Environment State (Docker Integration):**
+- Container lifecycle status
+- Volume attachment information
+- Network configuration details
+- Resource allocation tracking
 
-**State Tracking:**
-```python
-@dataclass
-class WorkspaceState:
-    name: str
-    persistent_volumes: Dict[str, VolumeInfo]
-    config_hash: str
-    last_accessed: datetime
-```
+**Persistent Data (Named Volumes):**
+- Workspace file preservation
+- Package cache maintenance
+- Development database storage
+- Configuration data persistence
 
-### Security Architecture
+## Interactive Setup System
 
-Security is implemented through multiple layers of isolation and access control:
+### Configuration Wizard Architecture
+
+The setup wizard provides guided configuration creation through project structure analysis and intelligent recommendation systems:
+
+**Detection Mechanisms:**
+- File pattern analysis for project type identification
+- Dependency file examination
+- Build system detection
+- Framework-specific marker recognition
+
+**Configuration Generation:**
+- Template selection based on project analysis
+- Intelligent default value assignment
+- Port allocation automation
+- Volume configuration optimization
+
+**Supported Project Types:**
+- Python (Django, Flask, FastAPI)
+- Node.js (React, Vue, Express)
+- Go (Web services, CLI applications)
+- PHP (Laravel, Symfony)
+- Generic containerized applications
+
+## Security Architecture
+
+Security implementation provides multiple isolation layers while maintaining development workflow flexibility:
 
 **Container Security:**
-- Non-root user execution
-- Capability restrictions
-- Read-only filesystem where possible
-- Network namespace isolation
+- User namespace isolation
+- Capability restriction enforcement
+- Read-only filesystem implementation
+- Network namespace separation
 
 **Credential Management:**
-- No secrets in container images
 - Runtime credential injection
+- No secrets in container images
 - SSH agent forwarding support
-- Temporary filesystem for sensitive data
+- Temporary credential storage
 
 **Access Control:**
-- Public key authentication only
-- Authorized keys validation
-- Port forwarding restrictions
-- Session timeout policies
+- Localhost-only port binding
+- Public key authentication requirements
+- Session timeout enforcement
+- Container resource limitations
 
 ## Implementation Details
 
-### Docker Integration
+### Context Detection Algorithm
 
-Direct Docker API usage provides fine-grained control over container behavior:
+Context resolution implements hierarchical detection with intelligent fallback mechanisms:
 
 ```python
-container = docker.containers.create(
-    image=env.image,
-    name=f"dev-{env.name}",
-    hostname=env.name,
-    volumes=volume_config,
-    environment=env.env,
-    mem_limit=env.memory,
-    cpu_quota=int(env.cpus * 100000),
-    user="1000:1000",  # Standard dev user
-    working_dir="/workspace"
+def resolve_context(name: Optional[str] = None) -> Optional[Context]:
+    if name:
+        return resolve_by_name(name)
+    
+    current_path = Path.cwd()
+    while current_path != current_path.parent:
+        dev_env_path = current_path / ".dev-env"
+        if dev_env_path.exists():
+            return get_context_by_path(current_path)
+        current_path = current_path.parent
+    
+    return None
+```
+
+### Docker Integration Strategy
+
+Direct Docker API usage provides precise container lifecycle control:
+
+```python
+container = docker.create_container(
+    name=f"dev-{context.name}-{hash_suffix}",
+    image=config.base_image,
+    hostname=context.name,
+    volumes=volume_configuration,
+    environment=environment_variables,
+    ports=port_mappings,
+    working_dir=config.working_directory,
+    user="dev:dev"
 )
 ```
 
-### SSH Configuration
+### Volume Management Strategy
 
-SSH access is configured automatically for each environment:
-
-1. Generate ephemeral host keys on container start
-2. Inject authorized public keys from host
-3. Configure SSH daemon with secure defaults
-4. Map container SSH port to host localhost
-
-### Volume Management
-
-Volumes provide persistent storage across container lifecycles:
+Volume management implements intelligent persistence policies for different data types:
 
 **Named Volumes:**
-- Workspace data preservation
-- Package cache persistence
-- Database storage
+- Package cache persistence across environment rebuilds
+- Database storage with lifecycle independence
+- Build artifact preservation
+- Configuration backup storage
 
 **Bind Mounts:**
+- Source code synchronization
 - Configuration file sharing
-- Credential injection
-- Tool settings synchronization
-
-### Git Integration
-
-Git repositories are cloned and configured automatically:
-
-1. Clone repository on environment creation
-2. Configure git user from host settings
-3. Setup SSH keys for remote access
-4. Handle shallow clones for performance
+- Development tool integration
+- Real-time file system access
 
 ## Usage Patterns
 
-### Basic Workflow
+### Context-Aware Workflow
 
 ```bash
-# Create new environment
-dev-env up project-name
+# Navigate to project directory
+cd /path/to/project
 
-# Connect via SSH
-dev-env ssh project-name
+# Start development environment (auto-detects context)
+dev-env work
 
-# Execute commands
-dev-env exec project-name -- make test
+# Access interactive shell
+dev-env shell
 
-# Stop environment
-dev-env down project-name
+# Execute commands within environment
+dev-env run python manage.py migrate
+dev-env run pytest
+
+# Stop environment while preserving data
+dev-env stop
+```
+
+### Multi-Project Management
+
+```bash
+# View all development contexts
+dev-env status --all
+
+# Work on specific project
+dev-env work --name api-service
+
+# Switch between projects
+cd ../frontend-app
+dev-env work  # Automatically detects different context
 ```
 
 ### Configuration Examples
 
-**Simple Project:**
-```python
-environments = {
-    "webapp": Environment(
-        name="webapp",
-        image="python:3.11",
-        git=GitConfig(url="git@github.com:user/webapp.git")
-    )
-}
+**Python Web Application:**
+```yaml
+base_image: python:3.13
+ports:
+  - container: 8000
+    host: 8000
+volumes:
+  - source: .
+    target: /app
+  - source: pip-cache
+    target: /root/.cache/pip
+    type: named
+environment:
+  DJANGO_SETTINGS_MODULE: myproject.settings.dev
+  PYTHONUNBUFFERED: "1"
+working_directory: /app
+setup_commands:
+  - pip install -r requirements.txt
+  - python manage.py migrate
 ```
 
-**Complex Project:**
-```python
-environments = {
-    "microservice": Environment(
-        name="microservice",
-        image="custom/dev-image:latest",
-        git=GitConfig(
-            url="git@github.com:org/service.git",
-            branch="develop",
-            shallow=False
-        ),
-        volumes=[
-            VolumeMount(
-                source=Path.home() / ".aws",
-                target=Path("/home/dev/.aws"),
-                readonly=True
-            )
-        ],
-        env={
-            "AWS_PROFILE": "development",
-            "DEBUG": "true"
-        },
-        memory="4g",
-        cpus=4.0
-    )
-}
+**Microservice Development:**
+```yaml
+base_image: golang:1.21
+ports:
+  - container: 8080
+    host: 8080
+  - container: 9090
+    host: 9090
+volumes:
+  - source: .
+    target: /go/src/app
+  - source: go-mod-cache
+    target: /go/pkg/mod
+    type: named
+environment:
+  CGO_ENABLED: "0"
+  GOOS: linux
+network:
+  name: microservices
+  driver: bridge
+working_directory: /go/src/app
 ```
 
-### Template Patterns
+## Error Handling Architecture
 
-Templates enable consistent configuration across similar projects:
+Comprehensive error handling provides clear recovery paths and informative diagnostics:
 
-```python
-def create_nodejs_env(name: str, repo: str) -> Environment:
-    return Environment(
-        name=name,
-        image="node:18",
-        git=GitConfig(url=repo),
-        volumes=[
-            VolumeMount(
-                source=Path.home() / ".npmrc",
-                target=Path("/home/dev/.npmrc"),
-                readonly=True
-            )
-        ],
-        env={"NODE_ENV": "development"}
-    )
-```
+**Configuration Validation Errors:**
+- Missing required fields with correction guidance
+- Invalid syntax highlighting with line numbers
+- Type mismatch detection with expected formats
+- Resource conflict identification with resolution suggestions
 
-## Error Handling
+**Runtime Environment Errors:**
+- Container creation failures with diagnostic information
+- Port allocation conflicts with alternative suggestions
+- Volume mount issues with permission guidance
+- Network connectivity problems with troubleshooting steps
 
-The system implements comprehensive error handling at each layer:
+**Context Resolution Errors:**
+- Missing context detection with creation prompts
+- Ambiguous context resolution with selection options
+- Path access issues with permission remediation
+- State corruption recovery with repair procedures
 
-**Configuration Errors:**
-- Missing required fields
-- Invalid type specifications
-- Circular dependencies
-- Resource conflicts
+## Performance Optimization
 
-**Runtime Errors:**
-- Container creation failures
-- Network port conflicts
-- Volume mount issues
-- SSH connection problems
+### Startup Performance
 
-**Recovery Strategies:**
-- Automatic cleanup on failure
-- Clear error messages with remediation steps
-- State consistency verification
-- Rollback capabilities
+Environment creation optimization through intelligent caching and parallel operations:
 
-## Performance Considerations
-
-### Startup Optimization
-
-- Layer caching for fast image pulls
-- Shallow git clones by default
-- Parallel initialization steps
-- Pre-built base images
+- Docker layer caching for rapid image retrieval
+- Parallel volume initialization procedures
+- Incremental setup command execution
+- Pre-built base image utilization
 
 ### Resource Management
 
-- CPU and memory limits
-- Automatic resource cleanup
-- Volume space monitoring
-- Container pruning policies
+Efficient resource utilization through intelligent allocation and cleanup:
+
+- Automatic resource limit enforcement
+- Unused resource garbage collection
+- Volume space monitoring with alerts
+- Container lifecycle optimization
 
 ### Network Performance
 
-- Local port forwarding
-- SSH connection pooling
-- Minimal network overhead
-- Efficient data transfer
+Optimized network configuration for development workflows:
 
-## Future Extensions
+- Localhost-only port binding for security
+- Efficient container-to-host communication
+- Minimal network overhead design
+- Connection pooling for SSH access
 
-### Planned Enhancements
+## Extension Architecture
 
-1. **Multi-Container Environments**: Support for microservice development
-2. **Cloud Integration**: Remote environment hosting
-3. **Team Sharing**: Collaborative development spaces
-4. **IDE Plugins**: Direct integration with popular editors
-5. **Metrics and Monitoring**: Resource usage tracking
+### Plugin System Design
 
-### Extension Points
+Extensible architecture supports custom functionality through well-defined interfaces:
 
-The architecture provides clear extension points for future functionality:
+**Configuration Plugins:**
+- Custom project type detection
+- Template generation systems
+- Validation rule extensions
+- Default value providers
 
-- Custom environment validators
-- Plugin-based credential providers
-- Alternative storage backends
-- Remote execution capabilities
+**Command Plugins:**
+- Custom workflow commands
+- Integration tool support
+- Monitoring system connections
+- Deployment pipeline triggers
+
+### Integration Points
+
+Clear extension points enable ecosystem integration:
+
+- IDE plugin support through standardized APIs
+- CI/CD system integration capabilities
+- Cloud provider connectivity options
+- Team collaboration system support
 
 ## Migration Strategy
 
-For teams transitioning from existing solutions:
+Systematic migration approach for teams transitioning from legacy systems:
 
-1. **Assessment Phase**: Inventory current development environments
-2. **Configuration Translation**: Convert existing setups to Python configs
-3. **Pilot Program**: Test with volunteer developers
-4. **Gradual Rollout**: Migrate projects incrementally
-5. **Full Adoption**: Standardize on new system
+**Assessment Phase:**
+- Current environment inventory
+- Workflow pattern analysis
+- Dependency mapping
+- Migration scope definition
+
+**Configuration Migration:**
+- Automated Python-to-YAML conversion
+- Template matching for common patterns
+- Custom configuration translation
+- Validation and testing procedures
+
+**Workflow Transition:**
+- Gradual command adoption
+- Parallel system operation
+- User training and documentation
+- Incremental team migration
 
 ## Conclusion
 
-This architecture provides a pragmatic solution for development environment management that balances simplicity with functionality. By leveraging Docker's isolation capabilities and Python's expressiveness, the system delivers consistent, secure, and rapidly deployable development environments.
+This architecture provides a comprehensive solution for context-aware development environment management that eliminates configuration overhead while maintaining operational flexibility. Through intelligent context detection, guided configuration generation, and robust state management, the system enables developers to focus on software development rather than infrastructure management.
 
-The design prioritizes developer experience while maintaining operational simplicity, enabling teams to focus on building software rather than managing infrastructure.
+The design prioritizes developer experience through automatic workspace detection and intelligent environment lifecycle management, while maintaining system reliability through comprehensive error handling and efficient resource management.

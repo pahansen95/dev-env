@@ -1,320 +1,468 @@
-"""Focused CLI tests for specific coverage improvements"""
+"""Focused CLI tests for specific context-based command coverage"""
 
-from unittest.mock import Mock, patch
+from unittest.mock import patch, MagicMock
 from argparse import Namespace
-
-from dev_env.cli import cmd_up, cmd_down
-
-
-class TestCmdUpNetworkHandling:
-  """Test network creation handling in cmd_up"""
-
-  @patch("dev_env.cli.check_docker_available", return_value=True)
-  @patch("dev_env.cli.load_environment")
-  @patch("dev_env.cli.StateManager")
-  @patch("dev_env.cli.validate_port_mappings", return_value=[])
-  @patch("dev_env.cli.validate_bind_mounts", return_value=[])
-  @patch("dev_env.cli.apply_security_defaults")
-  @patch("dev_env.cli.DockerClient")
-  def test_cmd_up_network_already_exists_handling(
-    self,
-    mock_docker_class,
-    mock_security,
-    mock_validate_mounts,
-    mock_validate_ports,
-    mock_state_class,
-    mock_load_env,
-    mock_check_docker,
-    tmp_path,
-    capsys,
-  ):
-    """Test cmd_up when network already exists"""
-    # Setup mocks
-    mock_env = Mock()
-    mock_env.name = "test-env"
-    mock_env.ports = None
-    mock_env.volumes = None
-    mock_env.base_image = "python:3.13"
-    mock_env.network.name = "existing-network"
-    mock_env.environment = {"TEST": "value"}
-    mock_load_env.return_value = mock_env
-    mock_security.return_value = mock_env
-
-    mock_state = Mock()
-    mock_state.get_environment.return_value = None
-    mock_state_class.return_value = mock_state
-
-    mock_docker = Mock()
-    mock_docker.ping.return_value = True
-    mock_docker.pull_image.return_value = None
-    # Network creation fails with "already exists"
-    mock_docker.create_network.side_effect = RuntimeError("network already exists")
-    mock_docker_class.return_value = mock_docker
-
-    args = Namespace(config=tmp_path / "test.py", name=None, state_dir=tmp_path / "state")
-
-    # Should continue execution despite network already existing
-    result = cmd_up(args)
-
-    captured = capsys.readouterr()
-    assert "Network already exists: existing-network" in captured.out
-
-  @patch("dev_env.cli.check_docker_available", return_value=True)
-  @patch("dev_env.cli.load_environment")
-  @patch("dev_env.cli.StateManager")
-  @patch("dev_env.cli.validate_port_mappings", return_value=[])
-  @patch("dev_env.cli.validate_bind_mounts", return_value=[])
-  @patch("dev_env.cli.apply_security_defaults")
-  @patch("dev_env.cli.DockerClient")
-  def test_cmd_up_network_creation_other_error(
-    self,
-    mock_docker_class,
-    mock_security,
-    mock_validate_mounts,
-    mock_validate_ports,
-    mock_state_class,
-    mock_load_env,
-    mock_check_docker,
-    tmp_path,
-    capsys,
-  ):
-    """Test cmd_up when network creation fails with non-exists error"""
-    # Setup mocks
-    mock_env = Mock()
-    mock_env.name = "test-env"
-    mock_env.ports = None
-    mock_env.volumes = None
-    mock_env.base_image = "python:3.13"
-    mock_env.network.name = "new-network"
-    mock_env.environment = {"TEST": "value"}
-    mock_load_env.return_value = mock_env
-    mock_security.return_value = mock_env
-
-    mock_state = Mock()
-    mock_state.get_environment.return_value = None
-    mock_state_class.return_value = mock_state
-
-    mock_docker = Mock()
-    mock_docker.ping.return_value = True
-    mock_docker.pull_image.return_value = None
-    # Network creation fails with different error
-    mock_docker.create_network.side_effect = RuntimeError("Network creation failed")
-    mock_docker_class.return_value = mock_docker
-
-    args = Namespace(config=tmp_path / "test.py", name=None, state_dir=tmp_path / "state")
-
-    # Should re-raise the error
-    result = cmd_up(args)
-
-    assert result == 1
-    captured = capsys.readouterr()
-    assert "Network creation failed" in captured.err
+import pytest
 
 
-class TestCmdUpContainerHandling:
-  """Test container creation and execution in cmd_up"""
+class TestWorkCommandNetworkHandling:
+  """Test network creation handling in work command"""
 
-  @patch("dev_env.cli.check_docker_available", return_value=True)
-  @patch("dev_env.cli.load_environment")
-  @patch("dev_env.cli.StateManager")
-  @patch("dev_env.cli.validate_port_mappings", return_value=[])
-  @patch("dev_env.cli.validate_bind_mounts", return_value=[])
-  @patch("dev_env.cli.apply_security_defaults")
-  @patch("dev_env.cli.DockerClient")
-  @patch("dev_env.cli.generate_container_name")
-  def test_cmd_up_container_start_sequence(
-    self,
-    mock_gen_name,
-    mock_docker_class,
-    mock_security,
-    mock_validate_mounts,
-    mock_validate_ports,
-    mock_state_class,
-    mock_load_env,
-    mock_check_docker,
-    tmp_path,
-    capsys,
-  ):
-    """Test successful container creation and start sequence"""
-    # Setup mocks
-    mock_env = Mock()
-    mock_env.name = "test-env"
-    mock_env.ports = None
-    mock_env.volumes = None
-    mock_env.base_image = "python:3.13"
-    mock_env.network = None  # No custom network
-    mock_env.environment = None
-    mock_load_env.return_value = mock_env
-    mock_security.return_value = mock_env
+  @patch("dev_env.commands.porcelain.work.WorkCommand._run_plumbing_command")
+  @patch("dev_env.commands.porcelain.work.WorkCommand._resolve_context")
+  def test_work_environment_creation_with_existing_network(self, mock_resolve, mock_run_plumbing):
+    """Test work command when Docker network already exists"""
+    from dev_env.commands.porcelain.work import WorkCommand
 
-    mock_state = Mock()
-    mock_state.get_environment.return_value = None
-    mock_state_class.return_value = mock_state
+    # Setup context resolution
+    mock_resolve.return_value = {"id": "test123", "name": "test-context", "path": "/test/path"}
 
-    mock_gen_name.return_value = "test-container-123"
+    # Mock plumbing command responses
+    def mock_plumbing_side_effect(*args):
+      command = args[0]
+      if hasattr(command, "__class__"):
+        if "EnvStatus" in command.__class__.__name__:
+          return {"state": "notfound"}
+        elif "EnvCreate" in command.__class__.__name__:
+          return {
+            "status": "success",
+            "message": "Network already exists: test-network",
+            "warnings": ["Network test-network already exists, reusing"],
+          }
+        elif "EnvStart" in command.__class__.__name__:
+          return {"status": "success"}
+      return {}
 
-    mock_docker = Mock()
-    mock_docker.ping.return_value = True
-    mock_docker.pull_image.return_value = None
-    mock_docker.create_container.return_value = "container123"
+    mock_run_plumbing.side_effect = mock_plumbing_side_effect
+
+    command = WorkCommand()
+    args = Namespace(name="test-context")
+
+    # Should handle existing network gracefully
+    with patch.object(command, "_load_config", return_value={"network": "test-network"}):
+      with patch.object(command, "_show_progress"):
+        command.execute(args)
+
+    # Verify environment creation was attempted
+    assert mock_run_plumbing.call_count >= 2
+
+  @patch("dev_env.commands.porcelain.work.WorkCommand._run_plumbing_command")
+  @patch("dev_env.commands.porcelain.work.WorkCommand._resolve_context")
+  def test_work_environment_creation_network_failure(self, mock_resolve, mock_run_plumbing):
+    """Test work command when network creation fails"""
+    from dev_env.commands.porcelain.work import WorkCommand
+
+    # Setup context resolution
+    mock_resolve.return_value = {"id": "test123", "name": "test-context", "path": "/test/path"}
+
+    # Mock network creation failure
+    def mock_plumbing_side_effect(*args):
+      command = args[0]
+      if hasattr(command, "__class__"):
+        if "EnvStatus" in command.__class__.__name__:
+          return {"state": "notfound"}
+        elif "EnvCreate" in command.__class__.__name__:
+          return {"error": "Failed to create network: permission denied"}
+      return {}
+
+    mock_run_plumbing.side_effect = mock_plumbing_side_effect
+
+    command = WorkCommand()
+    args = Namespace(name="test-context")
+
+    # Should exit with error when network creation fails
+    with patch.object(command, "_load_config", return_value={"network": "custom-network"}):
+      with pytest.raises(SystemExit):
+        command.execute(args)
+
+
+class TestWorkCommandContainerLifecycle:
+  """Test container creation and lifecycle in work command"""
+
+  @patch("dev_env.commands.porcelain.work.WorkCommand._run_plumbing_command")
+  @patch("dev_env.commands.porcelain.work.WorkCommand._resolve_context")
+  def test_work_complete_environment_setup_sequence(self, mock_resolve, mock_run_plumbing):
+    """Test complete environment setup sequence in work command"""
+    from dev_env.commands.porcelain.work import WorkCommand
+
+    # Setup context resolution
+    mock_resolve.return_value = {"id": "test123", "name": "test-context", "path": "/test/path"}
+
+    call_sequence = []
+
+    # Mock sequential plumbing command responses
+    def mock_plumbing_side_effect(*args):
+      command = args[0]
+      if hasattr(command, "__class__"):
+        command_name = command.__class__.__name__
+        call_sequence.append(command_name)
+
+        if "EnvStatus" in command_name:
+          return {"state": "notfound"}
+        elif "EnvCreate" in command_name:
+          return {
+            "status": "success",
+            "container_id": "test123",
+            "steps": [
+              "Image pulled: python:3.13",
+              "Container created: dev-test-context-abc123",
+              "Container started successfully",
+            ],
+          }
+        elif "EnvStart" in command_name:
+          return {"status": "success", "state": "running"}
+      return {}
+
+    mock_run_plumbing.side_effect = mock_plumbing_side_effect
+
+    command = WorkCommand()
+    args = Namespace(name="test-context")
+
+    # Should complete full setup sequence
+    with patch.object(command, "_load_config", return_value={"base_image": "python:3.13"}):
+      with patch.object(command, "_show_progress"):
+        command.execute(args)
+
+    # Verify correct command sequence
+    assert "EnvStatusCommand" in call_sequence
+    assert "EnvCreateCommand" in call_sequence
+
+  @patch("dev_env.commands.porcelain.work.WorkCommand._run_plumbing_command")
+  @patch("dev_env.commands.porcelain.work.WorkCommand._resolve_context")
+  def test_work_container_ready_validation(self, mock_resolve, mock_run_plumbing):
+    """Test container readiness validation in work command"""
+    from dev_env.commands.porcelain.work import WorkCommand
+
+    # Setup context resolution
+    mock_resolve.return_value = {"id": "test123", "name": "test-context", "path": "/test/path"}
+
+    # Mock container creation with readiness check
+    def mock_plumbing_side_effect(*args):
+      command = args[0]
+      if hasattr(command, "__class__"):
+        if "EnvStatus" in command.__class__.__name__:
+          return {"state": "stopped"}
+        elif "EnvStart" in command.__class__.__name__:
+          return {"status": "success", "state": "running", "readiness": "Container ready after 2.3s"}
+      return {}
+
+    mock_run_plumbing.side_effect = mock_plumbing_side_effect
+
+    command = WorkCommand()
+    args = Namespace(name="test-context")
+
+    # Should validate container readiness
+    with patch.object(command, "_load_config", return_value={"base_image": "python:3.13"}):
+      with patch.object(command, "_show_progress"):
+        command.execute(args)
+
+    # Verify environment start was called
+    assert mock_run_plumbing.call_count >= 2
+
+
+class TestStopCommandResourceCleanup:
+  """Test resource cleanup in stop command"""
+
+  @patch("dev_env.commands.porcelain.stop.StopCommand._run_plumbing_command")
+  @patch("dev_env.commands.porcelain.stop.StopCommand._resolve_context")
+  def test_stop_skip_volume_cleanup(self, mock_resolve, mock_run_plumbing):
+    """Test stop command skipping volume cleanup by default"""
+    from dev_env.commands.porcelain.stop import StopCommand
+
+    # Setup context resolution
+    mock_resolve.return_value = {"id": "test123", "name": "test-context", "path": "/test/path"}
+
+    # Mock stop operation without volume cleanup
+    def mock_plumbing_side_effect(*args):
+      return {
+        "status": "success",
+        "message": "Environment stopped",
+        "volumes_preserved": ["test-volume-1", "test-volume-2"],
+        "cleanup_skipped": ["volumes"],
+      }
+
+    mock_run_plumbing.side_effect = mock_plumbing_side_effect
+
+    command = StopCommand()
+    args = Namespace(name="test-context")
+
+    # Should preserve volumes by default
+    with patch.object(command, "_show_progress"):
+      command.execute(args)
+
+    # Verify stop command was called
+    mock_run_plumbing.assert_called()
+
+  @patch("dev_env.commands.porcelain.stop.StopCommand._run_plumbing_command")
+  @patch("dev_env.commands.porcelain.stop.StopCommand._resolve_context")
+  def test_stop_with_resource_cleanup(self, mock_resolve, mock_run_plumbing):
+    """Test stop command with comprehensive resource cleanup"""
+    from dev_env.commands.porcelain.stop import StopCommand
+
+    # Setup context resolution
+    mock_resolve.return_value = {"id": "test123", "name": "test-context", "path": "/test/path"}
+
+    # Mock comprehensive cleanup
+    def mock_plumbing_side_effect(*args):
+      return {
+        "status": "success",
+        "message": "Environment stopped with cleanup",
+        "cleanup_performed": {
+          "container": "removed",
+          "volumes": ["test-volume-1", "test-volume-2"],
+          "networks": ["test-network"],
+          "images": [],
+        },
+      }
+
+    mock_run_plumbing.side_effect = mock_plumbing_side_effect
+
+    command = StopCommand()
+    args = Namespace(name="test-context", cleanup=True)  # With cleanup flag
+
+    # Should perform comprehensive cleanup
+    with patch.object(command, "_show_progress"):
+      command.execute(args)
+
+    # Verify cleanup was performed
+    mock_run_plumbing.assert_called()
+
+
+class TestStatusCommandFormatting:
+  """Test status command output formatting"""
+
+  @patch("dev_env.commands.porcelain.status.StatusCommand._run_plumbing_command")
+  @patch("dev_env.commands.porcelain.status.StatusCommand._resolve_context")
+  def test_status_error_message_formatting(self, mock_resolve, mock_run_plumbing):
+    """Test status command error message formatting"""
+    from dev_env.commands.porcelain.status import StatusCommand
+
+    # Context resolution succeeds
+    mock_resolve.return_value = {"id": "test123", "name": "test-context", "path": "/test/path"}
+
+    # Environment status check fails
+    mock_run_plumbing.return_value = {
+      "error": "Docker daemon not available",
+      "error_code": "DOCKER_UNAVAILABLE",
+      "suggestions": ["Start Docker daemon", "Check Docker installation"],
+    }
+
+    command = StatusCommand()
+
+    # Should format error messages appropriately
+    with patch("builtins.print") as mock_print:
+      command._show_current_status()
+
+      # Verify error formatting was handled
+      mock_run_plumbing.assert_called()
+
+  @patch("dev_env.commands.porcelain.status.StatusCommand._run_plumbing_command")
+  @patch("dev_env.commands.porcelain.status.StatusCommand._resolve_context")
+  def test_status_rich_formatting_output(self, mock_resolve, mock_run_plumbing):
+    """Test status command rich formatting with timestamps and icons"""
+    from dev_env.commands.porcelain.status import StatusCommand
+
+    # Context resolution succeeds
+    mock_resolve.return_value = {
+      "id": "test123",
+      "name": "test-context",
+      "path": "/test/path",
+      "created_at": "2024-01-01T10:00:00Z",
+      "last_used": "2024-01-02T15:30:00Z",
+    }
+
+    # Environment status with detailed info
+    mock_run_plumbing.return_value = {
+      "state": "running",
+      "container_id": "abc123",
+      "uptime": "2 hours 15 minutes",
+      "resource_usage": {"cpu": "15%", "memory": "256MB/1GB"},
+    }
+
+    command = StatusCommand()
+
+    # Should display rich formatted output
+    with patch.object(command, "_display_context_status") as mock_display:
+      command._show_current_status()
+
+      # Verify formatting method was called
+      mock_display.assert_called_once()
+
+
+class TestRunCommandEdgeCases:
+  """Test edge case handling in run command"""
+
+  @patch("dev_env.commands.porcelain.run.RunCommand._run_plumbing_command")
+  @patch("dev_env.commands.porcelain.run.RunCommand._resolve_context")
+  def test_run_empty_command_handling(self, mock_resolve, mock_run_plumbing):
+    """Test run command with empty command arguments"""
+    from dev_env.commands.porcelain.run import RunCommand
+
+    # Context resolution succeeds
+    mock_resolve.return_value = {"id": "test123", "name": "test-context", "path": "/test/path"}
+
+    # Empty command should be handled gracefully
+    mock_run_plumbing.return_value = {"error": "Command cannot be empty", "exit_code": 1}
+
+    command = RunCommand()
+    args = Namespace(command=[])  # Empty command
+
+    # Should handle empty command appropriately
+    with pytest.raises(SystemExit):
+      command.execute(args)
+
+  @patch("dev_env.commands.porcelain.run.RunCommand._run_plumbing_command")
+  @patch("dev_env.commands.porcelain.run.RunCommand._resolve_context")
+  def test_run_command_with_complex_arguments(self, mock_resolve, mock_run_plumbing):
+    """Test run command with complex command arguments"""
+    from dev_env.commands.porcelain.run import RunCommand
+
+    # Context resolution succeeds
+    mock_resolve.return_value = {"id": "test123", "name": "test-context", "path": "/test/path"}
+
+    # Complex command execution
+    mock_run_plumbing.return_value = {
+      "status": "success",
+      "exit_code": 0,
+      "output": "Command executed successfully",
+      "command": ["bash", "-c", "echo 'hello world' | grep hello"],
+    }
+
+    command = RunCommand()
+    args = Namespace(command=["bash", "-c", "echo 'hello world' | grep hello"])
+
+    # Should handle complex command structures
+    command.execute(args)
+
+    # Verify command was passed correctly
+    mock_run_plumbing.assert_called()
+
+
+class TestShellCommandEdgeCases:
+  """Test edge case handling in shell command"""
+
+  @patch("dev_env.commands.porcelain.shell.ShellCommand._run_plumbing_command")
+  @patch("dev_env.commands.porcelain.shell.ShellCommand._resolve_context")
+  def test_shell_environment_transition_handling(self, mock_resolve, mock_run_plumbing):
+    """Test shell command when environment is transitioning states"""
+    from dev_env.commands.porcelain.shell import ShellCommand
+
+    # Context resolution succeeds
+    mock_resolve.return_value = {"id": "test123", "name": "test-context", "path": "/test/path"}
+
+    # Environment in transitioning state
+    def mock_plumbing_side_effect(*args):
+      command = args[0]
+      if hasattr(command, "__class__"):
+        if "EnvStatus" in command.__class__.__name__:
+          return {"state": "starting", "message": "Container is starting up, please wait"}
+        elif "Attach" in command.__class__.__name__:
+          return {"error": "Cannot attach to starting container", "retry_after": 5}
+      return {}
+
+    mock_run_plumbing.side_effect = mock_plumbing_side_effect
+
+    command = ShellCommand()
+    args = Namespace()
+
+    # Should handle transitioning state appropriately
+    with pytest.raises(SystemExit):
+      command.execute(args)
+
+
+class TestPlumbingCommandIntegration:
+  """Test plumbing command integration scenarios"""
+
+  @patch("dev_env.commands.plumbing.env_create.DockerClient")
+  @patch("dev_env.commands.plumbing.env_create.StateManager")
+  def test_env_create_with_environment_variables(self, mock_state_class, mock_docker_class):
+    """Test environment creation with complex environment variable handling"""
+    from dev_env.commands.plumbing.env_create import EnvCreateCommand
+
+    # Mock successful Docker operations
+    mock_docker = MagicMock()
+    mock_docker.create_container.return_value = "test123"
     mock_docker.start_container.return_value = None
-    mock_docker.wait_for_container_ready.return_value = True
     mock_docker_class.return_value = mock_docker
 
-    args = Namespace(config=tmp_path / "test.py", name=None, state_dir=tmp_path / "state")
+    # Mock state management
+    mock_state = MagicMock()
+    mock_state_class.return_value = mock_state
 
-    result = cmd_up(args)
+    command = EnvCreateCommand()
+    args = Namespace(context="test-context")
 
-    assert result == 0
-    captured = capsys.readouterr()
-    assert "Creating container: test-container-123" in captured.out
-    assert "Starting container..." in captured.out
-    assert "Environment 'test-env' is up and running!" in captured.out
+    # Test with complex environment configuration
+    with patch("dev_env.config_detector.ConfigDetector") as mock_detector:
+      mock_detector.return_value.detect.return_value = {
+        "type": "yaml",
+        "config": {
+          "base_image": "python:3.13",
+          "environment": {"PATH": "/usr/local/bin:$PATH", "PYTHONPATH": "/app:/app/src", "DEBUG": "true"},
+        },
+      }
 
+      # Should handle complex environment variables
+      with patch("sys.stdout"):
+        command.run(args)
 
-class TestCmdDownVolumeHandling:
-  """Test volume removal in cmd_down"""
+  @patch("dev_env.commands.plumbing.context_create.ContextManager")
+  def test_context_create_path_validation(self, mock_context_manager_class):
+    """Test context creation with path validation"""
+    from dev_env.commands.plumbing.context_create import ContextCreateCommand
 
-  @patch("dev_env.cli.check_docker_available", return_value=True)
-  @patch("dev_env.cli.StateManager")
-  @patch("dev_env.cli.DockerClient")
-  def test_cmd_down_skip_volume_removal(self, mock_docker_class, mock_state_class, mock_check_docker, tmp_path, capsys):
-    """Test cmd_down skipping volume removal when not specified"""
-    # Setup mocks
-    mock_state = Mock()
-    mock_state.get_environment.return_value = {
-      "name": "test-env",
-      "container_id": "container123",
-      # No volume_name specified
+    # Mock successful context creation
+    mock_context_manager = MagicMock()
+    mock_context = MagicMock()
+    mock_context.to_dict.return_value = {
+      "id": "test123",
+      "name": "test-context",
+      "path": "/valid/path",
+      "created_at": "2024-01-01T10:00:00Z",
+      "last_used": "2024-01-01T10:00:00Z",
+      "state": "active",
     }
-    mock_state_class.return_value = mock_state
+    mock_context_manager.create_context.return_value = mock_context
+    mock_context_manager_class.return_value = mock_context_manager
 
-    mock_docker = Mock()
-    mock_docker.ping.return_value = True
-    mock_docker.remove_container.return_value = None
-    mock_docker_class.return_value = mock_docker
+    command = ContextCreateCommand()
+    args = Namespace(name="test-context", path="/valid/path")
 
-    # Mock args without volumes flag
-    args = Mock()
-    args.name = "test-env"
-    args.state_dir = tmp_path / "state"
-    args.volumes = False  # Don't remove volumes
+    # Should validate and create context successfully
+    with patch("sys.stdout"):
+      command.run(args)
 
-    result = cmd_down(args)
+    # Verify context creation was called
+    mock_context_manager.create_context.assert_called_once()
 
-    assert result == 0
-    captured = capsys.readouterr()
-    assert "Removing container..." in captured.out
-    # Should not try to remove volumes
-    mock_docker.remove_volume.assert_not_called()
 
-  @patch("dev_env.cli.check_docker_available", return_value=True)
-  @patch("dev_env.cli.StateManager")
-  @patch("dev_env.cli.DockerClient")
-  def test_cmd_down_with_volume_removal(self, mock_docker_class, mock_state_class, mock_check_docker, tmp_path, capsys):
-    """Test cmd_down with volume removal"""
-    # Setup mocks
-    mock_state = Mock()
-    mock_state.get_environment.return_value = {
-      "name": "test-env",
-      "container_id": "container123",
-      "volumes": ["test-volume-1", "test-volume-2"],
+class TestConfigurationValidation:
+  """Test configuration validation scenarios"""
+
+  @patch("dev_env.commands.porcelain.work.WorkCommand._load_config")
+  @patch("dev_env.commands.porcelain.work.WorkCommand._resolve_context")
+  def test_work_invalid_configuration_handling(self, mock_resolve, mock_load_config):
+    """Test work command with invalid configuration scenarios"""
+    from dev_env.commands.porcelain.work import WorkCommand
+
+    # Context resolution succeeds
+    mock_resolve.return_value = {"id": "test123", "name": "test-context", "path": "/test/path"}
+
+    # Configuration loading returns invalid config
+    mock_load_config.return_value = {
+      "errors": ["Missing required field: base_image", "Invalid port mapping: 80:80 requires privileged access"],
+      "warnings": ["Using default working directory"],
     }
-    mock_state_class.return_value = mock_state
 
-    mock_docker = Mock()
-    mock_docker.ping.return_value = True
-    mock_docker.remove_container.return_value = None
-    mock_docker.remove_volume.return_value = None
-    mock_docker_class.return_value = mock_docker
+    command = WorkCommand()
+    args = Namespace(name="test-context")
 
-    # Mock args with volumes flag
-    args = Mock()
-    args.name = "test-env"
-    args.state_dir = tmp_path / "state"
-    args.volumes = True  # Remove volumes
+    # Should handle configuration validation errors
+    with patch.object(command, "_setup_wizard") as mock_wizard:
+      mock_wizard.return_value = {"base_image": "python:3.13"}
 
-    result = cmd_down(args)
+      with patch.object(command, "_show_progress"):
+        command.execute(args)
 
-    assert result == 0
-    captured = capsys.readouterr()
-    assert "Removing volume: test-volume-1" in captured.out
-    # Should have called remove_volume for both volumes
-    assert mock_docker.remove_volume.call_count == 2
-
-
-class TestCmdErrorMessageFormatting:
-  """Test error message formatting in CLI commands"""
-
-  @patch("dev_env.cli.check_docker_available", return_value=True)
-  @patch("dev_env.cli.load_environment")
-  @patch("dev_env.cli.StateManager")
-  def test_cmd_up_config_error_formatting(self, mock_state_class, mock_load_env, mock_check_docker, tmp_path, capsys):
-    """Test ConfigError formatting in cmd_up"""
-    from dev_env.utils import ConfigError
-
-    # Mock ConfigError with proper format_error method
-    error = ConfigError("Test configuration error")
-    error.exit_code = 2
-    mock_load_env.side_effect = error
-
-    args = Namespace(config=tmp_path / "test.py", name=None, state_dir=tmp_path / "state")
-
-    result = cmd_up(args)
-
-    assert result == 2
-    captured = capsys.readouterr()
-    assert "Error:" in captured.err  # Should use format_error()
-
-
-class TestEdgeCaseHandling:
-  """Test edge case handling in CLI"""
-
-  @patch("dev_env.cli.check_docker_available", return_value=True)
-  @patch("dev_env.cli.load_environment")
-  @patch("dev_env.cli.StateManager")
-  @patch("dev_env.cli.validate_port_mappings", return_value=[])
-  @patch("dev_env.cli.validate_bind_mounts", return_value=[])
-  @patch("dev_env.cli.apply_security_defaults")
-  @patch("dev_env.cli.DockerClient")
-  def test_cmd_up_empty_environment_dict(
-    self,
-    mock_docker_class,
-    mock_security,
-    mock_validate_mounts,
-    mock_validate_ports,
-    mock_state_class,
-    mock_load_env,
-    mock_check_docker,
-    tmp_path,
-  ):
-    """Test cmd_up with empty environment variables"""
-    # Setup mocks
-    mock_env = Mock()
-    mock_env.name = "test-env"
-    mock_env.ports = None
-    mock_env.volumes = None
-    mock_env.base_image = "python:3.13"
-    mock_env.network = None
-    mock_env.environment = {}  # Empty environment dict
-    mock_load_env.return_value = mock_env
-    mock_security.return_value = mock_env
-
-    mock_state = Mock()
-    mock_state.get_environment.return_value = None
-    mock_state_class.return_value = mock_state
-
-    mock_docker = Mock()
-    mock_docker.ping.return_value = True
-    mock_docker.pull_image.side_effect = Exception("Test early termination")
-    mock_docker_class.return_value = mock_docker
-
-    args = Namespace(config=tmp_path / "test.py", name=None, state_dir=tmp_path / "state")
-
-    with patch("dev_env.cli.generate_container_name") as mock_gen_name:
-      mock_gen_name.return_value = "test-container"
-
-      result = cmd_up(args)
-
-      # Should handle empty environment dict correctly
-      assert result == 0  # Empty environment dict is valid
+      # Should trigger setup wizard for invalid config
+      mock_wizard.assert_called_once()

@@ -16,7 +16,7 @@ _dev_env_completion() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     # Main commands
-    local commands="up down list exec ssh logs"
+    local commands="work stop run status shell context-create context-resolve context-list env-create env-start env-stop env-status plumbing-exec plumbing-attach completion"
 
     case $COMP_CWORD in
         1)
@@ -25,21 +25,24 @@ _dev_env_completion() {
             ;;
         2)
             case "$prev" in
-                up)
-                    # Complete config files (.py only)
-                    COMPREPLY=($(compgen -f -X '!*.py' -- "$cur"))
+                run|plumbing-exec)
+                    # Complete common commands
+                    local exec_commands="bash sh python3 python ls cat cd pwd"
+                    COMPREPLY=($(compgen -W "$exec_commands" -- "$cur"))
                     ;;
-                down|exec|ssh|logs)
-                    # Complete environment names
-                    local envs=$(_dev_env_list_environments)
-                    COMPREPLY=($(compgen -W "$envs" -- "$cur"))
+                context-create)
+                    # Context name (no completion needed)
+                    ;;
+                completion)
+                    # Complete shell types
+                    COMPREPLY=($(compgen -W "bash zsh fish" -- "$cur"))
                     ;;
             esac
             ;;
         3)
             case "${COMP_WORDS[1]}" in
-                exec)
-                    # For exec command, complete common commands
+                run|plumbing-exec)
+                    # Continue completing commands/arguments
                     local exec_commands="bash sh python3 python ls cat cd pwd"
                     COMPREPLY=($(compgen -W "$exec_commands" -- "$cur"))
                     ;;
@@ -49,29 +52,36 @@ _dev_env_completion() {
 
     # Handle flags
     case "$prev" in
-        --name)
-            # Don't complete for name flag
+        --name|--context)
+            # Complete context names
+            local contexts=$(_dev_env_list_contexts)
+            COMPREPLY=($(compgen -W "$contexts" -- "$cur"))
             ;;
-        --tail)
-            # Complete common tail numbers
-            COMPREPLY=($(compgen -W "10 50 100 500" -- "$cur"))
+        --path)
+            # Complete directories
+            COMPREPLY=($(compgen -d -- "$cur"))
             ;;
         --state-dir)
             # Complete directories
             COMPREPLY=($(compgen -d -- "$cur"))
             ;;
+        -o|--output)
+            # Complete files for completion output
+            COMPREPLY=($(compgen -f -- "$cur"))
+            ;;
     esac
 }
 
-_dev_env_list_environments() {
-    # List existing environments using Python module
+_dev_env_list_contexts() {
+    # List existing contexts using Python module
     python3 -c "
 try:
     from dev_env.state import StateManager
     from pathlib import Path
     state = StateManager(Path.home() / '.dev-env' / 'state')
-    envs = state.list_environments()
-    print(' '.join(envs.keys()))
+    with state:
+        rows = state.conn.execute('SELECT name FROM contexts ORDER BY last_used DESC').fetchall()
+        print(' '.join(row[0] for row in rows))
 except:
     pass
 " 2>/dev/null
@@ -79,8 +89,6 @@ except:
 
 complete -F _dev_env_completion dev-env
 complete -F _dev_env_completion 'python3 -m dev_env'
-
-# Also register for direct Python module execution
 complete -F _dev_env_completion 'python -m dev_env'
 """.strip()
 
@@ -106,35 +114,54 @@ _dev_env() {
     case $state in
         args)
             case $words[1] in
-                up)
+                work)
                     _arguments \
-                        '--name[Override environment name]:name:' \
-                        '*:config file:_files -g "*.py"'
+                        '--name[Context name]:name:_dev_env_contexts'
                     ;;
-                down)
+                stop)
                     _arguments \
-                        '--volumes[Also remove volumes]' \
-                        '*:environment name:_dev_env_environments'
+                        '--name[Context name]:name:_dev_env_contexts'
                     ;;
-                list)
-                    # No additional arguments
-                    ;;
-                exec)
+                run)
                     _arguments \
-                        '1:environment name:_dev_env_environments' \
                         '*:command:_command_names'
                     ;;
-                ssh)
+                status)
                     _arguments \
-                        '1:environment name:_dev_env_environments' \
-                        '*:ssh args:'
+                        '--all[Show all environments]'
                     ;;
-                logs)
+                shell)
+                    # No additional arguments
+                    ;;
+                context-create)
                     _arguments \
-                        '-f[Follow log output]' \
-                        '--follow[Follow log output]' \
-                        '--tail[Number of lines to show]:lines:(10 50 100 500)' \
-                        '*:environment name:_dev_env_environments'
+                        '1:context name:' \
+                        '--path[Path to context]:path:_directories'
+                    ;;
+                context-resolve)
+                    _arguments \
+                        '--name[Context name to resolve]:name:_dev_env_contexts'
+                    ;;
+                context-list)
+                    # No additional arguments
+                    ;;
+                env-create|env-start|env-stop|env-status)
+                    _arguments \
+                        '--context[Context name]:context:_dev_env_contexts'
+                    ;;
+                plumbing-exec)
+                    _arguments \
+                        '--context[Context name]:context:_dev_env_contexts' \
+                        '*:command:_command_names'
+                    ;;
+                plumbing-attach)
+                    _arguments \
+                        '--context[Context name]:context:_dev_env_contexts'
+                    ;;
+                completion)
+                    _arguments \
+                        '1:shell:(bash zsh fish)' \
+                        '(-o --output)'{-o,--output}'[Output file]:file:_files'
                     ;;
             esac
             ;;
@@ -143,30 +170,40 @@ _dev_env() {
 
 _dev_env_commands() {
     local commands=(
-        'up:Create and start an environment'
-        'down:Stop and remove an environment'
-        'list:List all environments'
-        'exec:Execute command in environment'
-        'ssh:SSH into environment'
-        'logs:Show container logs'
+        'work:Start or resume development session'
+        'stop:Stop development environment'  
+        'run:Execute command in current environment'
+        'status:Show environment status'
+        'shell:Open interactive shell'
+        'context-create:Create a new context'
+        'context-resolve:Resolve context from path or name'
+        'context-list:List all contexts'
+        'env-create:Create environment from config'
+        'env-start:Start existing environment'
+        'env-stop:Stop running environment'
+        'env-status:Get environment status'
+        'plumbing-exec:Execute command in environment'
+        'plumbing-attach:Attach to environment TTY'
+        'completion:Generate shell completion scripts'
     )
     _describe 'commands' commands
 }
 
-_dev_env_environments() {
-    local envs
-    envs=(${(f)"$(python3 -c "
+_dev_env_contexts() {
+    local contexts
+    contexts=(${(f)"$(python3 -c "
 try:
     from dev_env.state import StateManager
     from pathlib import Path
     state = StateManager(Path.home() / '.dev-env' / 'state')
-    envs = state.list_environments()
-    for name in envs.keys():
-        print(name)
+    with state:
+        rows = state.conn.execute('SELECT name FROM contexts ORDER BY last_used DESC').fetchall()
+        for row in rows:
+            print(row[0])
 except:
     pass
 " 2>/dev/null)"})
-    _describe 'environments' envs
+    _describe 'contexts' contexts
 }
 
 _dev_env "$@"
@@ -178,16 +215,17 @@ def generate_fish_completion() -> str:
   return """
 # dev-env fish completion script
 
-# Helper function to list environments
-function __dev_env_list_environments
+# Helper function to list contexts
+function __dev_env_list_contexts
     python3 -c "
 try:
     from dev_env.state import StateManager
     from pathlib import Path
     state = StateManager(Path.home() / '.dev-env' / 'state')
-    envs = state.list_environments()
-    for name in envs.keys():
-        print(name)
+    with state:
+        rows = state.conn.execute('SELECT name FROM contexts ORDER BY last_used DESC').fetchall()
+        for row in rows:
+            print(row[0])
 except:
     pass
 " 2>/dev/null
@@ -195,37 +233,57 @@ end
 
 # Main command completions
 complete -c dev-env -f
-complete -c dev-env -n "__fish_use_subcommand" -a "up" -d "Create and start an environment"
-complete -c dev-env -n "__fish_use_subcommand" -a "down" -d "Stop and remove an environment"
-complete -c dev-env -n "__fish_use_subcommand" -a "list" -d "List all environments"
-complete -c dev-env -n "__fish_use_subcommand" -a "exec" -d "Execute command in environment"
-complete -c dev-env -n "__fish_use_subcommand" -a "ssh" -d "SSH into environment"
-complete -c dev-env -n "__fish_use_subcommand" -a "logs" -d "Show container logs"
+complete -c dev-env -n "__fish_use_subcommand" -a "work" -d "Start or resume development session"
+complete -c dev-env -n "__fish_use_subcommand" -a "stop" -d "Stop development environment"
+complete -c dev-env -n "__fish_use_subcommand" -a "run" -d "Execute command in current environment"
+complete -c dev-env -n "__fish_use_subcommand" -a "status" -d "Show environment status"
+complete -c dev-env -n "__fish_use_subcommand" -a "shell" -d "Open interactive shell"
+complete -c dev-env -n "__fish_use_subcommand" -a "context-create" -d "Create a new context"
+complete -c dev-env -n "__fish_use_subcommand" -a "context-resolve" -d "Resolve context from path or name"
+complete -c dev-env -n "__fish_use_subcommand" -a "context-list" -d "List all contexts"
+complete -c dev-env -n "__fish_use_subcommand" -a "env-create" -d "Create environment from config"
+complete -c dev-env -n "__fish_use_subcommand" -a "env-start" -d "Start existing environment"
+complete -c dev-env -n "__fish_use_subcommand" -a "env-stop" -d "Stop running environment"
+complete -c dev-env -n "__fish_use_subcommand" -a "env-status" -d "Get environment status"
+complete -c dev-env -n "__fish_use_subcommand" -a "plumbing-exec" -d "Execute command in environment"
+complete -c dev-env -n "__fish_use_subcommand" -a "plumbing-attach" -d "Attach to environment TTY"
+complete -c dev-env -n "__fish_use_subcommand" -a "completion" -d "Generate shell completion scripts"
 
 # Global options
 complete -c dev-env -l version -d "Show version"
 complete -c dev-env -l state-dir -d "Directory for storing environment state" -r
 
-# up command
-complete -c dev-env -n "__fish_seen_subcommand_from up" -l name -d "Override environment name" -r
-complete -c dev-env -n "__fish_seen_subcommand_from up" -F -a "*.py" -d "Configuration file"
+# work command
+complete -c dev-env -n "__fish_seen_subcommand_from work" -l name -d "Context name" -f -a "(__dev_env_list_contexts)"
 
-# down command
-complete -c dev-env -n "__fish_seen_subcommand_from down" -l volumes -d "Also remove volumes"
-complete -c dev-env -n "__fish_seen_subcommand_from down" -f -a "(__dev_env_list_environments)" -d "Environment name"
+# stop command
+complete -c dev-env -n "__fish_seen_subcommand_from stop" -l name -d "Context name" -f -a "(__dev_env_list_contexts)"
 
-# exec command
-complete -c dev-env -n "__fish_seen_subcommand_from exec; and test (count (commandline -opc)) -eq 2" -f -a "(__dev_env_list_environments)" -d "Environment name"
-complete -c dev-env -n "__fish_seen_subcommand_from exec; and test (count (commandline -opc)) -gt 2" -a "bash sh python3 python ls cat cd pwd" -d "Command to execute"
+# run command
+complete -c dev-env -n "__fish_seen_subcommand_from run" -a "bash sh python3 python ls cat cd pwd" -d "Command to execute"
 
-# ssh command
-complete -c dev-env -n "__fish_seen_subcommand_from ssh" -f -a "(__dev_env_list_environments)" -d "Environment name"
+# status command
+complete -c dev-env -n "__fish_seen_subcommand_from status" -l all -d "Show all environments"
 
-# logs command
-complete -c dev-env -n "__fish_seen_subcommand_from logs" -f -a "(__dev_env_list_environments)" -d "Environment name"
-complete -c dev-env -n "__fish_seen_subcommand_from logs" -s f -l follow -d "Follow log output"
-complete -c dev-env -n "__fish_seen_subcommand_from logs" -l tail -d "Number of lines to show" -r -a "10 50 100 500"
+# context-create command
+complete -c dev-env -n "__fish_seen_subcommand_from context-create" -l path -d "Path to context" -r
 
+# context-resolve command
+complete -c dev-env -n "__fish_seen_subcommand_from context-resolve" -l name -d "Context name to resolve" -f -a "(__dev_env_list_contexts)"
+
+# env commands
+complete -c dev-env -n "__fish_seen_subcommand_from env-create env-start env-stop env-status" -l context -d "Context name" -f -a "(__dev_env_list_contexts)"
+
+# plumbing-exec command
+complete -c dev-env -n "__fish_seen_subcommand_from plumbing-exec" -l context -d "Context name" -f -a "(__dev_env_list_contexts)"
+complete -c dev-env -n "__fish_seen_subcommand_from plumbing-exec; and __fish_prev_arg_in --context" -a "bash sh python3 python ls cat cd pwd" -d "Command to execute"
+
+# plumbing-attach command
+complete -c dev-env -n "__fish_seen_subcommand_from plumbing-attach" -l context -d "Context name" -f -a "(__dev_env_list_contexts)"
+
+# completion command
+complete -c dev-env -n "__fish_seen_subcommand_from completion" -f -a "bash zsh fish" -d "Shell type"
+complete -c dev-env -n "__fish_seen_subcommand_from completion" -s o -l output -d "Output file" -r
 
 # Also complete for python -m dev_env
 complete -c python3 -n "contains -- '-m' (commandline -opc); and contains -- 'dev_env' (commandline -opc)" -w dev-env

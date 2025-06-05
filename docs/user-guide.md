@@ -2,7 +2,7 @@
 
 ## Quick Start Guide
 
-Dev-Env provides rapidly deployable, isolated development environments using Docker containers. This guide covers installation, basic usage, and common workflows.
+Dev-Env provides context-aware development environment management using Docker containers. This guide covers installation, basic usage, and common workflows.
 
 ### Prerequisites
 
@@ -26,270 +26,391 @@ python -m dev_env --help
 
 ### Your First Environment
 
-1. **Create a configuration file** (`myproject.py`):
-
-```python
-from dev_env.config import Environment, GitConfig
-
-environment = Environment(
-    name="myproject",
-    base_image="python:3.13-slim",
-    command=["/bin/bash"],
-    ports={
-        22: {"HostPort": 2222},    # SSH access
-        8000: {"HostPort": 8000}   # Application port
-    },
-    git=GitConfig(
-        url="https://github.com/yourusername/myproject.git",
-        branch="main"
-    )
-)
-```
-
-2. **Start the environment**:
+1. **Navigate to your project directory**:
 
 ```bash
-python -m dev_env up myproject.py
+cd /path/to/your/project
 ```
 
-3. **Connect via SSH**:
+2. **Start your development environment**:
 
 ```bash
-python -m dev_env ssh myproject
+python -m dev_env work
 ```
 
-4. **Execute commands**:
+The system will:
+- Detect existing context or prompt to create one
+- Launch setup wizard if no configuration exists
+- Create and start your development environment
+- Display connection instructions
+
+3. **Enter your environment**:
 
 ```bash
-python -m dev_env exec myproject python --version
+python -m dev_env shell
 ```
 
-5. **Stop and remove**:
+4. **Execute commands in your environment**:
 
 ```bash
-python -m dev_env down myproject
+python -m dev_env run python --version
+python -m dev_env run pip install -r requirements.txt
+```
+
+5. **Stop your environment**:
+
+```bash
+python -m dev_env stop
 ```
 
 ## Configuration Reference
 
-### Environment Configuration
+### YAML Configuration Format
 
-The `Environment` dataclass defines your development workspace:
+Dev-env uses `dev-env.yaml` files for environment configuration:
 
-```python
-Environment(
-    name="unique-identifier",              # Required: Environment name
-    base_image="ubuntu:22.04",            # Required: Docker image
-    command=["/bin/bash"],                # Optional: Container command
-    environment={                         # Optional: Environment variables
-        "KEY": "value"
-    },
-    volumes=[                             # Optional: Volume mounts
-        VolumeMount(
-            source=".",                   # Host path or volume name
-            target="/workspace",          # Container path
-            mode="rw",                    # Access mode: "rw" or "ro"
-            type="bind"                   # Mount type: "bind" or "named"
-        )
-    ],
-    ports={                               # Optional: Port mappings
-        22: {"HostPort": 2222},          # SSH port (enables SSH access)
-        8080: {"HostPort": 8080}         # Application ports
-    },
-    git=GitConfig(                        # Optional: Git repository
-        url="https://github.com/...",
-        branch="main",
-        path="/workspace",
-        shallow=True                      # Shallow clone for speed
-    ),
-    network=NetworkConfig(                # Optional: Custom network
-        name="mynetwork",
-        driver="bridge"
-    )
-)
+```yaml
+# Development Environment Configuration
+base_image: python:3.13-slim
+ports:
+  - container: 22
+    host: 2222
+  - container: 8000
+    host: 8000
+volumes:
+  - source: .
+    target: /workspace
+  - source: pip-cache
+    target: /root/.cache/pip
+    type: named
+environment:
+  PYTHONUNBUFFERED: "1"
+  DEBUG: "true"
+working_directory: /workspace
 ```
 
-### Volume Management
+### Configuration Fields
 
-Dev-Env supports two volume types:
+**Required Fields:**
+- `base_image`: Docker image for the container
+
+**Optional Fields:**
+- `ports`: Port mappings between container and host
+- `volumes`: Volume mounts for data persistence
+- `environment`: Environment variables
+- `working_directory`: Default working directory
+- `network`: Custom network configuration
+- `setup_commands`: Commands to run during container setup
+
+### Volume Configuration
 
 **Bind Mounts** - Link host directories:
-```python
-VolumeMount(
-    source="./src",           # Relative or absolute host path
-    target="/app/src",        # Container path
-    mode="rw"                 # Read-write access
-)
+```yaml
+volumes:
+  - source: ./src
+    target: /app/src
+    mode: rw
 ```
 
 **Named Volumes** - Persistent Docker volumes:
-```python
-VolumeMount(
-    source="myproject-cache",  # Volume name
-    target="/root/.cache",     # Container path
-    type="named"               # Specify named volume
-)
+```yaml
+volumes:
+  - source: myproject-cache
+    target: /root/.cache
+    type: named
+```
+
+**Volume Options:**
+- `source`: Host path (bind) or volume name (named)
+- `target`: Container mount path
+- `mode`: Access mode (`rw` or `ro`)
+- `type`: Mount type (`bind` or `named`)
+
+### Port Configuration
+
+```yaml
+ports:
+  - container: 8000    # Container port
+    host: 8000         # Host port
+  - container: 22      # SSH access
+    host: 2222
+```
+
+### Network Configuration
+
+```yaml
+network:
+  name: dev-network
+  driver: bridge
+  options:
+    com.docker.network.bridge.name: dev-br0
+```
+
+## Context Management
+
+### Context Lifecycle
+
+Dev-env manages development contexts that represent isolated workspaces:
+
+1. **Context Detection**: Automatically finds contexts by walking up directory tree
+2. **Context Creation**: Creates new contexts when none exist
+3. **Environment Association**: Links contexts to Docker containers
+4. **State Persistence**: Maintains context and environment state
+
+### Context Commands
+
+**Create Context**:
+```bash
+python -m dev_env context-create myproject --path /path/to/project
+```
+
+**Resolve Context**:
+```bash
+python -m dev_env context-resolve --name myproject
+```
+
+**List Contexts**:
+```bash
+python -m dev_env context-list
 ```
 
 ## Common Workflows
 
 ### Python Web Development
 
-```python
-# django-dev.py
-from dev_env.config import Environment, VolumeMount, GitConfig
-
-environment = Environment(
-    name="django-app",
-    base_image="python:3.13",
-    ports={
-        22: {"HostPort": 2222},
-        8000: {"HostPort": 8000}  # Django dev server
-    },
-    environment={
-        "PYTHONUNBUFFERED": "1",
-        "DJANGO_SETTINGS_MODULE": "myproject.settings.dev"
-    },
-    volumes=[
-        VolumeMount(source=".", target="/app"),
-        VolumeMount(
-            source="django-pip-cache",
-            target="/root/.cache/pip",
-            type="named"
-        )
-    ],
-    git=GitConfig(
-        url="git@github.com:yourusername/django-app.git",
-        path="/app"
-    )
-)
+Configuration (`dev-env.yaml`):
+```yaml
+base_image: python:3.13
+ports:
+  - container: 22
+    host: 2222
+  - container: 8000
+    host: 8000
+volumes:
+  - source: .
+    target: /app
+  - source: pip-cache
+    target: /root/.cache/pip
+    type: named
+environment:
+  PYTHONUNBUFFERED: "1"
+  DJANGO_SETTINGS_MODULE: myproject.settings.dev
+working_directory: /app
+setup_commands:
+  - pip install --upgrade pip
+  - pip install -r requirements.txt
 ```
 
-Usage:
+Workflow:
 ```bash
-# Start environment
-python -m dev_env up django-dev.py
+# Start development environment
+python -m dev_env work
 
-# SSH in and run Django
-python -m dev_env ssh django-app
-cd /app
-pip install -r requirements.txt
-python manage.py runserver 0.0.0.0:8000
+# Access shell
+python -m dev_env shell
+
+# Run Django development server
+python -m dev_env run python manage.py runserver 0.0.0.0:8000
 
 # Access at http://localhost:8000
 ```
 
-### Node.js Full Stack
+### Node.js Development
 
-```python
-# node-fullstack.py
-from dev_env.config import Environment, VolumeMount, NetworkConfig
-
-environment = Environment(
-    name="node-app",
-    base_image="node:20",
-    ports={
-        22: {"HostPort": 2223},
-        3000: {"HostPort": 3000},  # Frontend
-        5000: {"HostPort": 5000}   # Backend API
-    },
-    environment={
-        "NODE_ENV": "development",
-        "CHOKIDAR_USEPOLLING": "true"  # Hot reload in Docker
-    },
-    volumes=[
-        VolumeMount(source=".", target="/app"),
-        VolumeMount(
-            source="node-modules",
-            target="/app/node_modules",
-            type="named"
-        )
-    ],
-    network=NetworkConfig(name="fullstack-net")
-)
+Configuration (`dev-env.yaml`):
+```yaml
+base_image: node:20-slim
+ports:
+  - container: 3000
+    host: 3000
+  - container: 5000
+    host: 5000
+volumes:
+  - source: .
+    target: /app
+  - source: node-modules
+    target: /app/node_modules
+    type: named
+environment:
+  NODE_ENV: development
+  CHOKIDAR_USEPOLLING: "true"
+working_directory: /app
+setup_commands:
+  - npm install
 ```
 
-### Database Development
+Workflow:
+```bash
+# Start environment
+python -m dev_env work
 
-```python
-# postgres-dev.py
-from dev_env.config import Environment, VolumeMount
+# Run development server
+python -m dev_env run npm run dev
 
-environment = Environment(
-    name="postgres-dev",
-    base_image="postgres:16",
-    ports={
-        5432: {"HostPort": 5432}
-    },
-    environment={
-        "POSTGRES_USER": "devuser",
-        "POSTGRES_PASSWORD": "devpass",
-        "POSTGRES_DB": "devdb"
-    },
-    volumes=[
-        VolumeMount(
-            source="postgres-data",
-            target="/var/lib/postgresql/data",
-            type="named"
-        ),
-        VolumeMount(
-            source="./init-scripts",
-            target="/docker-entrypoint-initdb.d",
-            mode="ro"
-        )
-    ]
-)
+# Run tests
+python -m dev_env run npm test
+```
+
+### Multi-Service Development
+
+Configuration (`dev-env.yaml`):
+```yaml
+base_image: ubuntu:22.04
+ports:
+  - container: 22
+    host: 2222
+  - container: 3000
+    host: 3000
+  - container: 5432
+    host: 5432
+volumes:
+  - source: .
+    target: /workspace
+  - source: postgres-data
+    target: /var/lib/postgresql/data
+    type: named
+environment:
+  POSTGRES_USER: devuser
+  POSTGRES_PASSWORD: devpass
+  POSTGRES_DB: devdb
+network:
+  name: microservices
+  driver: bridge
+setup_commands:
+  - apt-get update
+  - apt-get install -y curl postgresql-client nodejs npm
+working_directory: /workspace
 ```
 
 ## Command Reference
 
-### Core Commands
+### User Commands
 
-**`up`** - Create and start an environment
+**`work`** - Start or resume development session
 ```bash
-python -m dev_env up <config-file> [--name <override-name>]
+python -m dev_env work [--name <context-name>]
 ```
 
-**`down`** - Stop and remove an environment
+**`stop`** - Stop development environment
 ```bash
-python -m dev_env down <env-name> [--volumes]  # --volumes removes data
+python -m dev_env stop [--name <context-name>]
 ```
 
-**`list`** - Show all environments
+**`status`** - Show environment status
 ```bash
-python -m dev_env list
+python -m dev_env status [--all]
 ```
 
-**`exec`** - Run commands in environment
+**`shell`** - Open interactive shell
 ```bash
-python -m dev_env exec <env-name> <command> [args...]
+python -m dev_env shell
 ```
 
-**`ssh`** - SSH into environment
+**`run`** - Execute command in environment
 ```bash
-python -m dev_env ssh <env-name> [ssh-options]
+python -m dev_env run <command> [args...]
 ```
 
-**`logs`** - View container logs
+### Context Commands
+
+**`context-create`** - Create new context
 ```bash
-python -m dev_env logs <env-name> [-f] [--tail 50]
+python -m dev_env context-create <name> [--path <path>]
 ```
 
-**`attach`** - Attach to container's main process
+**`context-resolve`** - Resolve context
 ```bash
-python -m dev_env attach <env-name>
+python -m dev_env context-resolve [--name <name>]
+```
+
+**`context-list`** - List contexts
+```bash
+python -m dev_env context-list
+```
+
+### Environment Commands
+
+**`env-create`** - Create environment
+```bash
+python -m dev_env env-create [--context <context>]
+```
+
+**`env-start`** - Start environment
+```bash
+python -m dev_env env-start [--context <context>]
+```
+
+**`env-stop`** - Stop environment
+```bash
+python -m dev_env env-stop [--context <context>]
+```
+
+**`env-status`** - Environment status
+```bash
+python -m dev_env env-status [--context <context>]
 ```
 
 ### Global Options
 
-- `--state-dir <path>` - Override state directory (default: `~/.dev-env/state`)
+- `--state-dir <path>` - Override state directory
 - `--version` - Show version information
+
+## Setup Wizard
+
+The interactive setup wizard guides configuration creation:
+
+### Wizard Flow
+
+1. **Project Type Detection**: Analyzes project structure
+2. **Base Image Selection**: Recommends appropriate Docker images
+3. **Port Configuration**: Configures necessary port mappings
+4. **Volume Setup**: Configures workspace and cache volumes
+5. **Environment Variables**: Sets up development environment
+6. **Configuration Generation**: Creates `dev-env.yaml` file
+
+### Supported Project Types
+
+- **Python**: Django, Flask, FastAPI, general Python projects
+- **Node.js**: React, Vue, Angular, Express, Next.js
+- **Go**: Web services, CLI applications
+- **Rust**: Web applications, system tools
+- **PHP**: Laravel, Symfony, WordPress
+- **Generic**: Custom configuration for any project type
 
 ## Troubleshooting
 
+### Context Resolution Issues
+
+**Problem**: "No context found in current directory"
+
+**Solution**:
+```bash
+# Create context for current directory
+python -m dev_env context-create myproject
+
+# Or specify path explicitly
+python -m dev_env work --name myproject
+```
+
+### Configuration Errors
+
+**Problem**: "Invalid configuration file"
+
+**Solution**:
+1. Validate YAML syntax
+2. Check required fields are present
+3. Verify volume source paths exist
+4. Ensure port numbers are available
+
+**Common Configuration Issues**:
+- Missing `base_image` field
+- Invalid YAML syntax (indentation, quotes)
+- Non-existent volume source paths
+- Port conflicts with running services
+
 ### Docker Connection Issues
 
-**Error**: "Docker daemon is not accessible"
+**Problem**: "Docker daemon not accessible"
 
 **Solution**:
 ```bash
@@ -298,149 +419,146 @@ sudo systemctl start docker
 
 # macOS: Start Docker Desktop
 
-# Add user to docker group (Linux)
-sudo usermod -aG docker $USER
-# Log out and back in
+# Verify Docker access
+docker info
+```
+
+### Environment Startup Failures
+
+**Problem**: Environment fails to start
+
+**Debugging Steps**:
+```bash
+# Check environment status
+python -m dev_env env-status
+
+# View container logs (if available)
+docker logs <container-name>
+
+# Recreate environment
+python -m dev_env env-stop
+python -m dev_env work
 ```
 
 ### Port Conflicts
 
-**Error**: "Port 8000 is already in use"
+**Problem**: "Port already in use"
 
 **Solution**:
-1. Find process using port: `lsof -i :8000`
-2. Stop conflicting process or use different port
-3. Update port mapping in configuration
-
-### SSH Connection Failed
-
-**Error**: "SSH server not responding"
-
-**Symptoms**: Container running but SSH fails
-
-**Solution**:
-```bash
-# Check container logs
-python -m dev_env logs <env-name> --tail 100
-
-# Verify SSH is enabled (port 22 in config)
-# Ensure base image supports package installation
-```
-
-### Volume Mount Issues
-
-**Error**: "Bind mount source does not exist"
-
-**Solution**:
-1. Create missing directories before starting
-2. Use absolute paths for clarity
-3. Check file permissions
+1. Identify conflicting process: `lsof -i :<port>`
+2. Stop conflicting service or modify configuration
+3. Update port mapping in `dev-env.yaml`
 
 ## Best Practices
 
-### Configuration Management
+### Project Organization
 
-1. **Version control your configs**: Store environment configurations alongside project code
-2. **Use templates**: Create reusable base configurations for common stacks
-3. **Environment variables**: Store secrets in `.env` files, not in configs
+1. **Configuration Versioning**: Store `dev-env.yaml` in version control
+2. **Context Naming**: Use descriptive, project-specific context names
+3. **Documentation**: Document environment setup in project README
 
-### Resource Optimization
+### Performance Optimization
 
-1. **Named volumes for caches**: Persist package caches across recreations
-2. **Shallow git clones**: Use `shallow=True` for faster repository setup
-3. **Appropriate base images**: Use `-slim` variants when possible
+1. **Named Volumes**: Use named volumes for package caches
+2. **Layer Caching**: Choose efficient base images
+3. **Resource Limits**: Consider container resource constraints
 
 ### Security Considerations
 
-1. **Avoid root passwords**: Use key-based SSH authentication only
-2. **Limit port exposure**: Only expose necessary ports to localhost
-3. **Regular updates**: Keep base images updated for security patches
+1. **Port Exposure**: Bind ports to localhost only
+2. **Volume Permissions**: Use appropriate file permissions
+3. **Secret Management**: Avoid hardcoding secrets in configuration
 
 ## Advanced Usage
 
 ### Custom Networks
 
-Create isolated networks for multi-service development:
+Create isolated networks for multi-service architectures:
 
-```python
-environment = Environment(
-    name="api-service",
-    base_image="python:3.13",
-    network=NetworkConfig(
-        name="microservices",
-        driver="bridge"
-    )
-)
+```yaml
+network:
+  name: microservices-net
+  driver: bridge
+  options:
+    com.docker.network.bridge.enable_icc: "true"
+```
+
+### Environment Inheritance
+
+Base configurations can be extended for different environments:
+
+```yaml
+# Base configuration
+base_image: python:3.13
+volumes:
+  - source: .
+    target: /app
+working_directory: /app
+
+# Development-specific additions
+environment:
+  DEBUG: "true"
+  LOG_LEVEL: debug
 ```
 
 ### Shell Completion
 
-Enable tab completion for commands:
+Enable command completion:
 
 ```bash
 # Bash
 python -m dev_env completion bash > ~/.dev-env-completion.bash
 echo 'source ~/.dev-env-completion.bash' >> ~/.bashrc
 
-# Zsh
-python -m dev_env completion zsh > ~/.zsh/completions/_dev-env
+# Zsh  
+python -m dev_env completion zsh > ~/.oh-my-zsh/completions/_dev-env
 
 # Fish
 python -m dev_env completion fish > ~/.config/fish/completions/dev-env.fish
 ```
 
-### State Management
-
-Dev-Env stores environment state in SQLite:
-
-```bash
-# Default location
-~/.dev-env/state/environments.db
-
-# Clean up orphaned state
-sqlite3 ~/.dev-env/state/environments.db "SELECT name FROM environments;"
-```
-
 ## Migration Guide
 
-### From Docker Compose
+### From Legacy Commands
 
-```yaml
-# docker-compose.yml
-services:
-  web:
-    image: python:3.13
-    ports:
-      - "8000:8000"
-    volumes:
-      - .:/app
-    environment:
-      - DEBUG=true
-```
+Legacy command migration mapping:
 
-Becomes:
+| Legacy | Modern | Context-Aware |
+|--------|---------|---------------|
+| `up config.py` | `work` | Auto-detects context |
+| `down name` | `stop` | Uses current context |
+| `list` | `status --all` | Rich formatting |
+| `exec name cmd` | `run cmd` | Context resolution |
+| `ssh name` | `shell` | Interactive access |
 
+### Configuration Migration
+
+**Legacy Python Configuration**:
 ```python
-# dev-env.py
-environment = Environment(
-    name="web",
+Environment(
+    name="myproject",
     base_image="python:3.13",
-    ports={8000: {"HostPort": 8000}},
-    volumes=[VolumeMount(source=".", target="/app")],
-    environment={"DEBUG": "true"}
+    ports={8000: {"HostPort": 8000}}
 )
 ```
 
-### From Vagrant
+**Modern YAML Configuration**:
+```yaml
+base_image: python:3.13
+ports:
+  - container: 8000
+    host: 8000
+```
 
-Key differences:
-- Containers instead of VMs (faster startup)
-- Docker images instead of box files
-- Python configuration instead of Ruby
-- No provider abstraction (Docker-only)
+### Migration Process
+
+1. **Context Creation**: Create context for existing project
+2. **Configuration Conversion**: Convert Python configs to YAML
+3. **Workflow Update**: Adopt context-based commands
+4. **Validation**: Test new workflow thoroughly
 
 ## Support
 
 - **Issues**: Report bugs via GitHub issues
-- **Documentation**: This guide and architecture docs
-- **Examples**: See `examples/` directory for more configurations
+- **Documentation**: Architecture and design documentation
+- **Examples**: Configuration examples in project repository
