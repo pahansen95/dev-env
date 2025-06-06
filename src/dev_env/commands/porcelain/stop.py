@@ -1,33 +1,37 @@
 """Stop command - suspend a development environment."""
 
 import json
-import sys
-from typing import Optional
+from typing import Optional, Any
 
+from dev_env.base_command import BaseCommand
+from dev_env.utils import ContextNotFoundError, DevEnvError
 from dev_env.commands.plumbing.context_resolve import ContextResolveCommand
 from dev_env.commands.plumbing.env_stop import EnvStopCommand
 from dev_env.commands.plumbing.env_status import EnvStatusCommand
 
 
-class StopCommand:
+class StopCommand(BaseCommand):
   """Stop a running development environment."""
 
-  def execute(self, args):
-    """Execute the stop command."""
+  def _run(self, args: Any) -> None:
+    """Execute the stop command logic."""
     # Resolve context
     context_name = getattr(args, "name", None)
     context = self._resolve_context(context_name)
 
     if not context:
-      print("Error: No context found", file=sys.stderr)
-      print("Run this command from a project directory or specify --name", file=sys.stderr)
-      sys.exit(1)
+      raise ContextNotFoundError(context_name or "current directory")
 
     # Check status
     status = self._get_status(context)
+
+    # Handle error responses that lack 'state' key
+    if "error" in status or "state" not in status:
+      error_msg = status.get("error", "Invalid status response format")
+      raise DevEnvError(f"Failed to check environment status: {error_msg}")
+
     if status["state"] == "notfound":
-      print(f"Environment '{context['name']}' does not exist", file=sys.stderr)
-      sys.exit(1)
+      raise DevEnvError(f"Environment '{context['name']}' does not exist")
 
     if status["state"] == "stopped":
       print(f"Environment '{context['name']}' is already stopped")
@@ -50,7 +54,7 @@ class StopCommand:
     status_args = type("Args", (), {"context": context["name"]})()
     return self._run_plumbing_command(EnvStatusCommand(), status_args)
 
-  def _stop_environment(self, context: dict):
+  def _stop_environment(self, context: dict) -> None:
     """Stop the environment."""
     print(f"● Stopping environment '{context['name']}'...")
 
@@ -58,8 +62,7 @@ class StopCommand:
     result = self._run_plumbing_command(EnvStopCommand(), stop_args)
 
     if "error" in result:
-      print(f"Error stopping environment: {result['error']}", file=sys.stderr)
-      sys.exit(1)
+      raise DevEnvError(f"Failed to stop environment: {result['error']}")
 
     print(f"✓ Environment '{context['name']}' stopped")
 
@@ -78,4 +81,4 @@ class StopCommand:
     try:
       return json.loads(output.getvalue())
     except json.JSONDecodeError:
-      return {"error": "Failed to parse command output"}
+      return {"error": "Failed to parse command output", "state": "error"}

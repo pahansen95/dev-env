@@ -1,22 +1,28 @@
 """Work command - start or resume a development session."""
 
 import json
-import sys
 from pathlib import Path
 from typing import Optional, Any
 
+from dev_env.base_command import BaseCommand
+from dev_env.utils import DevEnvError, ConfigError
 from dev_env.commands.plumbing.context_create import ContextCreateCommand
 from dev_env.commands.plumbing.context_resolve import ContextResolveCommand
 from dev_env.commands.plumbing.env_create import EnvCreateCommand
 from dev_env.commands.plumbing.env_start import EnvStartCommand
 from dev_env.commands.plumbing.env_status import EnvStatusCommand
+from dev_env.io import InputProvider, StdinInputProvider
 
 
-class WorkCommand:
+class WorkCommand(BaseCommand):
   """Start or resume a development session."""
 
-  def execute(self, args):
-    """Execute the work command."""
+  def __init__(self, input_provider: Optional[InputProvider] = None):
+    """Initialize work command with input provider."""
+    self.input_provider = input_provider or StdinInputProvider()
+
+  def _run(self, args: Any) -> None:
+    """Execute the work command logic."""
     # Step 1: Context resolution
     context = self._resolve_context(args.name if hasattr(args, "name") else None)
     if not context:
@@ -56,10 +62,9 @@ class WorkCommand:
     self._show_progress("Creating new context")
 
     # Get context name
-    name = input("Enter context name: ").strip()
+    name = self.input_provider.get_input("Enter context name: ")
     if not name:
-      print("Error: Context name cannot be empty", file=sys.stderr)
-      sys.exit(1)
+      raise ConfigError("Context name cannot be empty")
 
     # Use current directory
     path = Path.cwd()
@@ -69,8 +74,7 @@ class WorkCommand:
     result = self._run_plumbing_command(ContextCreateCommand(), create_args)
 
     if "error" in result:
-      print(f"Error creating context: {result['error']}", file=sys.stderr)
-      sys.exit(1)
+      raise ConfigError(f"Failed to create context: {result['error']}")
 
     self._show_progress("Creating new context", done=True)
     return result
@@ -101,15 +105,22 @@ class WorkCommand:
       state=context.get("state", "active"),
     )
 
-    # Run the wizard
-    wizard = SetupWizard()
+    # Run the wizard with the same input provider
+    wizard = SetupWizard(input_provider=self.input_provider)
     config_data = wizard.run(context_obj)
 
     # Convert config to YAML format
     config_yaml = self._dict_to_yaml(config_data)
 
     config_path = Path(context["path"]) / "dev-env.yaml"
-    config_path.write_text(config_yaml)
+
+    # Ensure parent directory exists
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+      config_path.write_text(config_yaml)
+    except (OSError, IOError) as e:
+      raise ConfigError(f"Failed to write configuration file: {e}")
 
     self._show_progress("Configuration saved", done=True)
     return {"path": str(config_path)}
@@ -124,7 +135,7 @@ class WorkCommand:
     self._show_progress("Checking environment status", done=True)
     return result
 
-  def _start_environment(self, context: dict):
+  def _start_environment(self, context: dict) -> None:
     """Start an existing environment."""
     self._show_progress("Starting environment")
 
@@ -132,12 +143,11 @@ class WorkCommand:
     result = self._run_plumbing_command(EnvStartCommand(), start_args)
 
     if "error" in result:
-      print(f"Error starting environment: {result['error']}", file=sys.stderr)
-      sys.exit(1)
+      raise DevEnvError(f"Failed to start environment: {result['error']}")
 
     self._show_progress("Starting environment", done=True)
 
-  def _create_environment(self, context: dict, config: dict):
+  def _create_environment(self, context: dict, config: dict) -> None:
     """Create a new environment."""
     self._show_progress("Creating environment")
 
@@ -145,15 +155,14 @@ class WorkCommand:
     result = self._run_plumbing_command(EnvCreateCommand(), create_args)
 
     if "error" in result:
-      print(f"Error creating environment: {result['error']}", file=sys.stderr)
-      sys.exit(1)
+      raise DevEnvError(f"Failed to create environment: {result['error']}")
 
     self._show_progress("Creating environment", done=True)
 
     # Now start it
     self._start_environment(context)
 
-  def _show_ready_message(self, context: dict):
+  def _show_ready_message(self, context: dict) -> None:
     """Show ready message to user."""
     print(f"\n✓ Development environment '{context['name']}' is ready!")
     print(f"  Working directory: {context['path']}")
@@ -162,7 +171,7 @@ class WorkCommand:
     print("\nTo execute a command, run:")
     print("  dev-env run <command>")
 
-  def _show_progress(self, message: str, done: bool = False):
+  def _show_progress(self, message: str, done: bool = False) -> None:
     """Show progress message."""
     symbol = "✓" if done else "●"
     print(f"{symbol} {message}")
@@ -185,7 +194,7 @@ class WorkCommand:
     try:
       return json.loads(output.getvalue())
     except json.JSONDecodeError:
-      return {"error": "Failed to parse command output"}
+      return {"error": "Failed to parse command output", "state": "error"}
 
   def _dict_to_yaml(self, data: dict) -> str:
     """Convert dictionary to YAML format without external dependencies."""

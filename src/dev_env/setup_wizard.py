@@ -4,14 +4,16 @@ from typing import Dict, Any, Optional
 
 from dev_env.config_detector import ConfigDetector
 from dev_env.context import Context
+from dev_env.io import InputProvider, StdinInputProvider
 
 
 class SetupWizard:
   """Interactive wizard for creating development environment configurations."""
 
-  def __init__(self):
+  def __init__(self, input_provider: Optional[InputProvider] = None):
     """Initialize the setup wizard."""
     self.detector = ConfigDetector()
+    self.input_provider = input_provider or StdinInputProvider()
 
   def run(self, context: Context) -> Dict[str, Any]:
     """
@@ -163,39 +165,13 @@ class SetupWizard:
 
   def _prompt_yes_no(self, prompt: str, default: bool = False) -> bool:
     """Prompt for yes/no answer."""
-    default_str = "Y/n" if default else "y/N"
-    while True:
-      response = input(f"{prompt} [{default_str}]: ").strip().lower()
-      if not response:
-        return default
-      if response in ("y", "yes"):
-        return True
-      if response in ("n", "no"):
-        return False
-      print("Please answer 'y' or 'n'")
+    return self.input_provider.get_yes_no(prompt, default)
 
   def _prompt_string(self, prompt: str, default: str = "") -> str:
     """Prompt for string input."""
-    response = input(f"{prompt} [{default}]: ").strip()
+    response = self.input_provider.get_input(f"{prompt} [{default}]")
     return response if response else default
 
   def _prompt_choice(self, prompt: str, choices: list[str], default: str) -> str:
     """Prompt for choice from list."""
-    print(f"\n{prompt}:")
-    for i, choice in enumerate(choices, 1):
-      marker = " *" if choice == default else ""
-      print(f"  {i}. {choice}{marker}")
-
-    while True:
-      response = input(f"Choice [1-{len(choices)}]: ").strip()
-      if not response:
-        return default
-
-      try:
-        idx = int(response) - 1
-        if 0 <= idx < len(choices):
-          return choices[idx]
-      except ValueError:
-        pass
-
-      print(f"Please enter a number between 1 and {len(choices)}")
+    return self.input_provider.get_choice(prompt, choices, default)

@@ -115,8 +115,6 @@ class TestContextResolveCommand:
 
   def test_resolve_by_name(self, tmp_path, capsys):
     """Test resolving context by name."""
-    # Use isolated state directory for this test
-
     # Create a context first
     test_dir = tmp_path / "project"
     test_dir.mkdir()
@@ -210,7 +208,8 @@ class TestContextListCommand:
 
   def test_list_empty(self, tmp_path, capsys):
     """Test listing when no contexts exist."""
-    with patch("dev_env.state.ContextManager") as MockManager:
+    # Ensure complete isolation by mocking at the command level
+    with patch("dev_env.commands.plumbing.context_list.ContextManager") as MockManager:
       manager = Mock()
       MockManager.return_value = manager
       manager.list_contexts.return_value = []
@@ -226,7 +225,8 @@ class TestContextListCommand:
 
   def test_list_multiple_contexts(self, tmp_path, capsys):
     """Test listing multiple contexts."""
-    with patch("dev_env.state.ContextManager") as MockManager:
+    # Ensure complete isolation by mocking at the command level
+    with patch("dev_env.commands.plumbing.context_list.ContextManager") as MockManager:
       manager = Mock()
       MockManager.return_value = manager
 

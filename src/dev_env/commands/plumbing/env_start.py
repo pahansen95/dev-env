@@ -1,5 +1,7 @@
 """Start an existing environment container."""
 
+from datetime import datetime
+
 from dev_env.cli_plumbing import PlumbingCommand
 from dev_env.context_resolver import ContextResolver
 from dev_env.docker import DockerClient
@@ -52,8 +54,6 @@ class EnvStartCommand(PlumbingCommand):
       docker.start_container(container_id)
 
       # Update context last_used
-      from datetime import datetime
-
       context.last_used = datetime.utcnow().isoformat()
       context_manager.update_context(context)
 

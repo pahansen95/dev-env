@@ -2,18 +2,19 @@
 
 import json
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 
+from dev_env.base_command import BaseCommand
 from dev_env.commands.plumbing.context_resolve import ContextResolveCommand
 from dev_env.commands.plumbing.context_list import ContextListCommand
 from dev_env.commands.plumbing.env_status import EnvStatusCommand
 
 
-class StatusCommand:
+class StatusCommand(BaseCommand):
   """Show human-readable status of development environments."""
 
-  def execute(self, args):
-    """Execute the status command."""
+  def _run(self, args: Any) -> None:
+    """Execute the status command logic."""
     # Check if we want all contexts or current
     show_all = getattr(args, "all", False)
 
@@ -22,7 +23,7 @@ class StatusCommand:
     else:
       self._show_current_status()
 
-  def _show_current_status(self):
+  def _show_current_status(self) -> None:
     """Show status of current context."""
     # Resolve current context
     context = self._resolve_context()
@@ -39,7 +40,7 @@ class StatusCommand:
     # Display status
     self._display_context_status(context, status)
 
-  def _show_all_status(self):
+  def _show_all_status(self) -> None:
     """Show status of all contexts."""
     # List all contexts
     list_args = type("Args", (), {})()
@@ -60,7 +61,7 @@ class StatusCommand:
       self._display_context_summary(context, status)
       print()
 
-  def _display_context_status(self, context: dict, status: dict):
+  def _display_context_status(self, context: dict, status: dict) -> None:
     """Display detailed status for a single context."""
     print(f"Context: {context['name']}")
     print(f"Path: {context['path']}")
@@ -103,7 +104,7 @@ class StatusCommand:
       print("  dev-env run       # Execute command")
       print("  dev-env stop      # Stop environment")
 
-  def _display_context_summary(self, context: dict, status: dict):
+  def _display_context_summary(self, context: dict, status: dict) -> None:
     """Display summary status for a context."""
     env_state = status.get("state", "notfound")
     state_symbol = {
@@ -170,4 +171,4 @@ class StatusCommand:
     try:
       return json.loads(output.getvalue())
     except json.JSONDecodeError:
-      return {"error": "Failed to parse command output"}
+      return {"error": "Failed to parse command output", "state": "error"}

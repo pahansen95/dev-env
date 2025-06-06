@@ -3,7 +3,8 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from dev_env.cli import main
+from dev_env.cli import main, set_command_factory, CommandFactory
+from dev_env.io import MockInputProvider
 
 
 class TestMainFunctionBasic:
@@ -25,172 +26,277 @@ class TestMainFunctionBasic:
       main()
 
   @patch("sys.argv", ["dev-env", "status", "--all"])
-  @patch("dev_env.commands.porcelain.status.StatusCommand")
-  def test_main_dispatches_status_command(self, mock_status_class):
+  def test_main_dispatches_status_command(self):
     """Test main function dispatches to status command"""
+    # Create mock factory
+    mock_factory = MagicMock(spec=CommandFactory)
     mock_status = MagicMock()
-    mock_status_class.return_value = mock_status
+    mock_status.execute.return_value = 0  # Return success exit code
+    mock_factory.create_status_command.return_value = mock_status
 
-    result = main()
+    # Set the factory for this test
+    original_factory = CommandFactory()
+    set_command_factory(mock_factory)
 
-    assert result == 0
-    mock_status_class.assert_called_once()
-    mock_status.execute.assert_called_once()
+    try:
+      result = main()
+
+      assert result == 0
+      mock_factory.create_status_command.assert_called_once()
+      mock_status.execute.assert_called_once()
+    finally:
+      # Restore original factory
+      set_command_factory(original_factory)
 
   @patch("sys.argv", ["dev-env", "work"])
-  @patch("dev_env.commands.porcelain.work.WorkCommand")
-  def test_main_dispatches_work_command(self, mock_work_class):
+  def test_main_dispatches_work_command(self):
     """Test main function dispatches to work command"""
+    # Create factory with mock input provider to avoid stdin issues
+    mock_input_provider = MockInputProvider(["test-context"])
+    test_factory = CommandFactory(input_provider=mock_input_provider)
+
+    # Mock the work command to avoid actual execution
     mock_work = MagicMock()
-    mock_work_class.return_value = mock_work
+    mock_work.execute.return_value = 0  # Return success exit code
+    with patch.object(test_factory, "create_work_command", return_value=mock_work):
+      original_factory = CommandFactory()
+      set_command_factory(test_factory)
 
-    result = main()
+      try:
+        result = main()
 
-    assert result == 0
-    mock_work_class.assert_called_once()
-    mock_work.execute.assert_called_once()
+        assert result == 0
+        mock_work.execute.assert_called_once()
+      finally:
+        # Restore original factory
+        set_command_factory(original_factory)
 
   @patch("sys.argv", ["dev-env", "stop"])
-  @patch("dev_env.commands.porcelain.stop.StopCommand")
-  def test_main_dispatches_stop_command(self, mock_stop_class):
+  def test_main_dispatches_stop_command(self):
     """Test main function dispatches to stop command"""
+    # Create mock factory
+    mock_factory = MagicMock(spec=CommandFactory)
     mock_stop = MagicMock()
-    mock_stop_class.return_value = mock_stop
+    mock_stop.execute.return_value = 0  # Return success exit code
+    mock_factory.create_stop_command.return_value = mock_stop
 
-    result = main()
+    # Set the factory for this test
+    original_factory = CommandFactory()
+    set_command_factory(mock_factory)
 
-    assert result == 0
-    mock_stop_class.assert_called_once()
-    mock_stop.execute.assert_called_once()
+    try:
+      result = main()
+
+      assert result == 0
+      mock_factory.create_stop_command.assert_called_once()
+      mock_stop.execute.assert_called_once()
+    finally:
+      # Restore original factory
+      set_command_factory(original_factory)
 
   @patch("sys.argv", ["dev-env", "work"])
-  @patch("dev_env.commands.porcelain.work.WorkCommand")
-  def test_main_handles_dev_env_error(self, mock_work_class, capsys):
+  def test_main_handles_dev_env_error(self, capsys):
     """Test main function handles DevEnvError"""
     from dev_env.utils import DevEnvError
 
     error = DevEnvError("Test error")
     error.exit_code = 5
+
+    # Create mock factory
+    mock_factory = MagicMock(spec=CommandFactory)
     mock_work = MagicMock()
     mock_work.execute.side_effect = error
-    mock_work_class.return_value = mock_work
+    mock_factory.create_work_command.return_value = mock_work
 
-    result = main()
+    # Set the factory for this test
+    original_factory = CommandFactory()
+    set_command_factory(mock_factory)
 
-    assert result == 5
-    captured = capsys.readouterr()
-    assert "Test error" in captured.err
-
-  @patch("dev_env.commands.porcelain.work.WorkCommand")
-  def test_main_creates_state_directory(self, mock_work_class, tmp_path):
-    """Test main function creates state directory"""
-    state_dir = tmp_path / "test-state"
-    mock_work = MagicMock()
-    mock_work_class.return_value = mock_work
-
-    with patch("sys.argv", ["dev-env", "--state-dir", str(state_dir), "work"]):
+    try:
       result = main()
 
-    assert result == 0
-    assert state_dir.exists()
+      assert result == 5
+      captured = capsys.readouterr()
+      assert "Test error" in captured.err
+    finally:
+      # Restore original factory
+      set_command_factory(original_factory)
+
+  def test_main_creates_state_directory(self, tmp_path):
+    """Test main function creates state directory"""
+    state_dir = tmp_path / "test-state"
+
+    # Create mock factory
+    mock_factory = MagicMock(spec=CommandFactory)
+    mock_work = MagicMock()
+    mock_work.execute.return_value = 0  # Return success exit code
+    mock_factory.create_work_command.return_value = mock_work
+
+    # Set the factory for this test
+    original_factory = CommandFactory()
+    set_command_factory(mock_factory)
+
+    try:
+      with patch("sys.argv", ["dev-env", "--state-dir", str(state_dir), "work"]):
+        result = main()
+
+      assert result == 0
+      assert state_dir.exists()
+    finally:
+      # Restore original factory
+      set_command_factory(original_factory)
 
 
 class TestArgumentParsing:
   """Test argument parsing coverage"""
 
   @patch("sys.argv", ["dev-env", "work", "--name", "custom-context"])
-  @patch("dev_env.commands.porcelain.work.WorkCommand")
-  def test_main_work_with_name_override(self, mock_work_class):
+  def test_main_work_with_name_override(self):
     """Test work command with name override"""
+    # Create mock factory
+    mock_factory = MagicMock(spec=CommandFactory)
     mock_work = MagicMock()
-    mock_work_class.return_value = mock_work
+    mock_work.execute.return_value = 0  # Return success exit code
+    mock_factory.create_work_command.return_value = mock_work
 
-    result = main()
+    # Set the factory for this test
+    original_factory = CommandFactory()
+    set_command_factory(mock_factory)
 
-    assert result == 0
-    args = mock_work.execute.call_args[0][0]
-    assert args.name == "custom-context"
+    try:
+      result = main()
+
+      assert result == 0
+      args = mock_work.execute.call_args[0][0]
+      assert args.name == "custom-context"
+    finally:
+      # Restore original factory
+      set_command_factory(original_factory)
 
   @patch("sys.argv", ["dev-env", "stop", "--name", "test-context"])
-  @patch("dev_env.commands.porcelain.stop.StopCommand")
-  def test_main_stop_with_name_flag(self, mock_stop_class):
+  def test_main_stop_with_name_flag(self):
     """Test stop command with name flag"""
+    # Create mock factory
+    mock_factory = MagicMock(spec=CommandFactory)
     mock_stop = MagicMock()
-    mock_stop_class.return_value = mock_stop
+    mock_stop.execute.return_value = 0  # Return success exit code
+    mock_factory.create_stop_command.return_value = mock_stop
 
-    result = main()
+    # Set the factory for this test
+    original_factory = CommandFactory()
+    set_command_factory(mock_factory)
 
-    assert result == 0
-    args = mock_stop.execute.call_args[0][0]
-    assert args.name == "test-context"
+    try:
+      result = main()
 
-  @patch("sys.argv", ["dev-env", "run", "bash", "-c", "echo hello"])
-  @patch("dev_env.commands.porcelain.run.RunCommand")
-  def test_main_run_with_command(self, mock_run_class):
+      assert result == 0
+      args = mock_stop.execute.call_args[0][0]
+      assert args.name == "test-context"
+    finally:
+      # Restore original factory
+      set_command_factory(original_factory)
+
+  @patch("sys.argv", ["dev-env", "run", "--", "bash", "-c", "echo hello"])
+  def test_main_run_with_command(self):
     """Test run command with command arguments"""
+    # Create mock factory
+    mock_factory = MagicMock(spec=CommandFactory)
     mock_run = MagicMock()
-    mock_run_class.return_value = mock_run
+    mock_run.execute.return_value = 0  # Return success exit code
+    mock_factory.create_run_command.return_value = mock_run
 
-    result = main()
+    # Set the factory for this test
+    original_factory = CommandFactory()
+    set_command_factory(mock_factory)
 
-    assert result == 0
-    args = mock_run.execute.call_args[0][0]
-    assert args.command == ["bash", "-c", "echo hello"]
+    try:
+      result = main()
+
+      assert result == 0
+      args = mock_run.execute.call_args[0][0]
+      assert args.command == ["bash", "-c", "echo hello"]
+    finally:
+      # Restore original factory
+      set_command_factory(original_factory)
 
   @patch("sys.argv", ["dev-env", "status", "--all"])
-  @patch("dev_env.commands.porcelain.status.StatusCommand")
-  def test_main_status_with_all_flag(self, mock_status_class):
+  def test_main_status_with_all_flag(self):
     """Test status command with --all flag"""
+    # Create mock factory
+    mock_factory = MagicMock(spec=CommandFactory)
     mock_status = MagicMock()
-    mock_status_class.return_value = mock_status
+    mock_status.execute.return_value = 0  # Return success exit code
+    mock_factory.create_status_command.return_value = mock_status
 
-    result = main()
+    # Set the factory for this test
+    original_factory = CommandFactory()
+    set_command_factory(mock_factory)
 
-    assert result == 0
-    args = mock_status.execute.call_args[0][0]
-    assert args.all is True
+    try:
+      result = main()
+
+      assert result == 0
+      args = mock_status.execute.call_args[0][0]
+      assert args.all is True
+    finally:
+      # Restore original factory
+      set_command_factory(original_factory)
 
   @patch("sys.argv", ["dev-env", "shell"])
-  @patch("dev_env.commands.porcelain.shell.ShellCommand")
-  def test_main_shell_command(self, mock_shell_class):
+  def test_main_shell_command(self):
     """Test shell command dispatch"""
+    # Create mock factory
+    mock_factory = MagicMock(spec=CommandFactory)
     mock_shell = MagicMock()
-    mock_shell_class.return_value = mock_shell
+    mock_shell.execute.return_value = 0  # Return success exit code
+    mock_factory.create_shell_command.return_value = mock_shell
 
-    result = main()
+    # Set the factory for this test
+    original_factory = CommandFactory()
+    set_command_factory(mock_factory)
 
-    assert result == 0
-    mock_shell_class.assert_called_once()
-    mock_shell.execute.assert_called_once()
+    try:
+      result = main()
+
+      assert result == 0
+      mock_factory.create_shell_command.assert_called_once()
+      mock_shell.execute.assert_called_once()
+    finally:
+      # Restore original factory
+      set_command_factory(original_factory)
 
 
 class TestPlumbingCommands:
   """Test plumbing command dispatch"""
 
-  @patch("sys.argv", ["dev-env", "context-create", "test-context"])
-  @patch("dev_env.commands.plumbing.context_create.ContextCreateCommand")
-  def test_main_context_create_command(self, mock_context_create_class):
+  @patch("sys.argv", ["dev-env", "context-create", "test-context", "--path", "/tmp/test"])
+  @patch("dev_env.cli.ContextCreateCommand")
+  def test_main_context_create_command(self, mock_context_class):
     """Test context-create command dispatch"""
-    mock_context_create = MagicMock()
-    mock_context_create_class.return_value = mock_context_create
+    # Create a mock instance
+    mock_instance = MagicMock()
+    mock_instance.run.return_value = None
+    mock_context_class.return_value = mock_instance
 
     result = main()
 
     assert result == 0
-    mock_context_create_class.assert_called_once()
-    mock_context_create.run.assert_called_once()
+    mock_context_class.assert_called_once()
+    mock_instance.run.assert_called_once()
 
   @patch("sys.argv", ["dev-env", "env-status", "--context", "test-context"])
-  @patch("dev_env.commands.plumbing.env_status.EnvStatusCommand")
+  @patch("dev_env.cli.EnvStatusCommand")
   def test_main_env_status_command(self, mock_env_status_class):
     """Test env-status command dispatch"""
-    mock_env_status = MagicMock()
-    mock_env_status_class.return_value = mock_env_status
+    mock_instance = MagicMock()
+    mock_instance.run.return_value = None
+    mock_env_status_class.return_value = mock_instance
 
     result = main()
 
     assert result == 0
-    args = mock_env_status.run.call_args[0][0]
+    mock_instance.run.assert_called_once()
+    args = mock_instance.run.call_args[0][0]
     assert args.context == "test-context"
 
 
@@ -215,8 +321,9 @@ class TestUnknownCommand:
   @patch("sys.argv", ["dev-env", "unknown-command"])
   def test_main_unknown_command(self, capsys):
     """Test main function handles unknown commands"""
-    result = main()
+    with pytest.raises(SystemExit) as exc_info:
+      main()
 
-    assert result == 1
+    assert exc_info.value.code == 2  # argparse returns 2 for invalid arguments
     captured = capsys.readouterr()
-    assert "Unknown command: unknown-command" in captured.err
+    assert "invalid choice: 'unknown-command'" in captured.err

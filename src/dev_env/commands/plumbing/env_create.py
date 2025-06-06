@@ -4,7 +4,8 @@ from dev_env.cli_plumbing import PlumbingCommand
 from dev_env.config import load_environment
 from dev_env.context_resolver import ContextResolver
 from dev_env.docker import DockerClient
-from dev_env.state import ContextManager
+from dev_env.state import ContextManager, StateManager
+from dev_env.utils import generate_container_name
 
 
 class EnvCreateCommand(PlumbingCommand):
@@ -45,8 +46,6 @@ class EnvCreateCommand(PlumbingCommand):
 
     try:
       # Generate container name
-      from dev_env.utils import generate_container_name
-
       container_name = generate_container_name(context.name)
 
       # Check if already exists
@@ -75,9 +74,7 @@ class EnvCreateCommand(PlumbingCommand):
       )
 
       # Save state
-      from dev_env.state import StateManager
-
-      state_manager = StateManager()
+      state_manager = StateManager(manager.state_dir)
       state_manager.save_environment(
         context.name,
         {

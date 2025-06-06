@@ -1,171 +1,120 @@
-"""Test configuration and fixtures for dev-env"""
+"""Test fixtures for isolated development environment testing."""
 
+import pytest
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch
-import pytest
+from typing import Generator, Dict, Any
+from unittest.mock import Mock, MagicMock
 
-from dev_env.config import Environment, VolumeMount, GitConfig, NetworkConfig
 from dev_env.state import StateManager
-from dev_env.docker import DockerClient
+from dev_env.state import ContextManager
+from dev_env.io import InputProvider
 
 
 @pytest.fixture
-def temp_dir():
-  """Create a temporary directory for test files"""
-  with tempfile.TemporaryDirectory() as tmp_dir:
-    yield Path(tmp_dir)
+def isolated_workspace() -> Generator[Dict[str, Path], None, None]:
+  """Create isolated filesystem workspace for testing."""
+  with tempfile.TemporaryDirectory() as temp_dir:
+    temp_path = Path(temp_dir)
+
+    workspace = temp_path / "workspace"
+    workspace.mkdir()
+
+    config_dir = workspace / ".dev-env"
+    config_dir.mkdir()
+
+    state_db = temp_path / "state.db"
+
+    yield {"temp_dir": temp_path, "workspace": workspace, "config_dir": config_dir, "state_db": state_db}
 
 
 @pytest.fixture
-def state_manager(temp_dir):
-  """Create a StateManager with temporary database"""
-  return StateManager(temp_dir / "state")
+def isolated_state_manager(isolated_workspace) -> StateManager:
+  """Create isolated StateManager for testing."""
+  state_db_path = isolated_workspace["state_db"]
+  return StateManager(state_db_path.parent)
 
 
 @pytest.fixture
-def mock_docker():
-  """Mock Docker client for testing without Docker dependency"""
-  with patch("dev_env.docker.DockerClient") as mock_client:
-    mock_instance = Mock(spec=DockerClient)
-    mock_client.return_value = mock_instance
-
-    # Configure common return values
-    mock_instance.pull_image.return_value = None
-    mock_instance.create_container.return_value = "container_123"
-    mock_instance.start_container.return_value = None
-    mock_instance.get_container.return_value = {
-      "State": {"Status": "running"},
-      "Config": {"Image": "python:3.13"},
-      "NetworkSettings": {"Ports": {}},
-    }
-    mock_instance.wait_for_container_ready.return_value = True
-
-    yield mock_instance
+def isolated_context_manager(isolated_state_manager) -> ContextManager:
+  """Create isolated ContextManager for testing."""
+  return ContextManager(isolated_state_manager.state_dir)
 
 
 @pytest.fixture
-def sample_environment():
-  """Create a sample Environment configuration for testing"""
-  return Environment(
-    name="test-env",
-    base_image="python:3.13",
-    command=["sleep", "infinity"],
-    ports={22: {"HostPort": 2222}, 8000: {"HostPort": 8000}},
-    environment={"TEST_VAR": "test_value"},
-    volumes=[VolumeMount(source="test-vol", target="/data"), VolumeMount(source="/tmp", target="/tmp")],
-    network=NetworkConfig(name="test-network", driver="bridge"),
-    git=GitConfig(url="https://github.com/test/repo.git", path="/workspace"),
-  )
+def mock_input_provider() -> InputProvider:
+  """Create mock InputProvider for non-interactive testing."""
+  mock = Mock(spec=InputProvider)
+  mock.get_input.return_value = "test-context"
+  mock.get_yes_no.return_value = True
+  return mock
 
 
 @pytest.fixture
-def sample_config_file(temp_dir, sample_environment):
-  """Create a sample configuration file"""
-  config_file = temp_dir / "test_config.py"
-  config_content = f'''
-from dev_env.config import Environment, VolumeMount, GitConfig, NetworkConfig
+def mock_docker_client():
+  """Create mock DockerClient for testing."""
+  mock = MagicMock()
 
-config = Environment(
-    name="{sample_environment.name}",
-    base_image="{sample_environment.base_image}",
-    command={sample_environment.command!r},
-    ports={sample_environment.ports!r},
-    environment={sample_environment.environment!r},
-    volumes=[
-        VolumeMount(source="test-vol", target="/data"),
-        VolumeMount(source="/tmp", target="/tmp")
-    ],
-    network=NetworkConfig(name="test-network", driver="bridge"),
-    git=GitConfig(url="https://github.com/test/repo.git", path="/workspace")
-)
-'''
-  config_file.write_text(config_content)
-  return config_file
+  # Default successful responses
+  mock.ping.return_value = True
+  mock.create_container.return_value = {"Id": "test-container-id"}
+  mock.start_container.return_value = None
+  mock.stop_container.return_value = None
+  mock.get_container.return_value = {"Id": "test-container-id", "State": {"Status": "running"}}
+
+  return mock
 
 
 @pytest.fixture
-def mock_check_docker_available():
-  """Mock Docker availability check"""
-  with patch("dev_env.utils.check_docker_available", return_value=True):
-    yield
+def standard_context(isolated_workspace) -> Dict[str, Any]:
+  """Create standard test context data."""
+  return {
+    "id": "test-context-id-12345",
+    "name": "test-context",
+    "path": str(isolated_workspace["workspace"]),
+    "created_at": "2025-01-01T00:00:00Z",
+    "last_used": "2025-01-01T00:00:00Z",
+    "state": "active",
+  }
 
 
 @pytest.fixture
-def mock_docker_unavailable():
-  """Mock Docker as unavailable"""
-  with patch("dev_env.utils.check_docker_available", return_value=False):
-    yield
+def standard_env_status() -> Dict[str, Any]:
+  """Create standard environment status response."""
+  return {"state": "running", "context_name": "test-context", "container_id": "test-container-id"}
 
 
 @pytest.fixture
-def mock_ssh_utils():
-  """Mock SSH-related utilities"""
-  with (
-    patch("dev_env.utils.setup_ssh_server") as mock_setup,
-    patch("dev_env.utils.inject_ssh_key") as mock_inject,
-    patch("dev_env.utils.get_host_ssh_key", return_value="ssh-rsa AAAA...") as mock_key,
-  ):
-    yield {"setup_ssh_server": mock_setup, "inject_ssh_key": mock_inject, "get_host_ssh_key": mock_key}
+def error_env_status() -> Dict[str, Any]:
+  """Create error environment status response."""
+  return {"error": "Environment not found", "state": "notfound"}
+
+
+class TestArgs:
+  """Simple args container for testing command interfaces."""
+
+  def __init__(self, **kwargs):
+    for key, value in kwargs.items():
+      setattr(self, key, value)
 
 
 @pytest.fixture
-def mock_git_utils():
-  """Mock Git-related utilities"""
-  with (
-    patch("dev_env.utils.setup_git_in_container") as mock_setup,
-    patch(
-      "dev_env.utils.get_host_git_config", return_value={"user.name": "Test", "user.email": "test@example.com"}
-    ) as mock_config,
-  ):
-    yield {"setup_git_in_container": mock_setup, "get_host_git_config": mock_config}
+def test_args():
+  """Factory for creating test argument objects."""
+  return TestArgs
 
 
 @pytest.fixture
-def captured_output():
-  """Capture stdout/stderr for testing CLI output"""
-  with patch("sys.stdout") as mock_stdout, patch("sys.stderr") as mock_stderr:
-    yield {"stdout": mock_stdout, "stderr": mock_stderr}
+def clean_database(isolated_workspace):
+  """Ensure clean database state for each test."""
+  db_path = isolated_workspace["state_db"]
 
+  # Remove any existing database
+  if db_path.exists():
+    db_path.unlink()
 
-@pytest.fixture
-def mock_subprocess():
-  """Mock subprocess calls"""
-  with patch("subprocess.call", return_value=0) as mock_call, patch("subprocess.run") as mock_run:
-    mock_run.return_value.returncode = 0
-    mock_run.return_value.stdout = ""
-    mock_run.return_value.stderr = ""
-    yield {"call": mock_call, "run": mock_run}
+  yield db_path
 
-
-@pytest.fixture
-def mock_docker_streaming():
-  """Mock Docker streaming responses for pull/build operations"""
-
-  def mock_stream(image_name=None, **kwargs):
-    """Mock streaming response with progress updates"""
-    return [
-      {"status": "Pulling from library/python", "id": "3.13"},
-      {"status": "Downloading", "progressDetail": {"current": 1024, "total": 10240}, "id": "layer1"},
-      {"status": "Download complete", "id": "layer1"},
-      {"status": "Extracting", "progressDetail": {"current": 5120, "total": 10240}, "id": "layer1"},
-      {"status": "Pull complete", "id": "layer1"},
-      {"status": "Digest: sha256:abcd1234...", "id": "3.13"},
-      {"status": "Status: Downloaded newer image for python:3.13"},
-    ]
-
-  with patch("dev_env.docker.DockerClient.pull_image") as mock_pull:
-    mock_pull.side_effect = mock_stream
-    yield mock_pull
-
-
-@pytest.fixture(autouse=True)
-def clean_environment():
-  """Clean up environment variables between tests"""
-  import os
-
-  original_env = os.environ.copy()
-  yield
-  # Restore original environment
-  os.environ.clear()
-  os.environ.update(original_env)
+  # Cleanup after test
+  if db_path.exists():
+    db_path.unlink()

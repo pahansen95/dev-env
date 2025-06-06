@@ -4,6 +4,7 @@ from dev_env.cli_plumbing import PlumbingCommand
 from dev_env.context_resolver import ContextResolver
 from dev_env.docker import DockerClient
 from dev_env.state import ContextManager, StateManager
+from dev_env.models import EnvironmentStatus
 
 
 class EnvStatusCommand(PlumbingCommand):
@@ -18,22 +19,25 @@ class EnvStatusCommand(PlumbingCommand):
     context = resolver.resolve(context_name)
 
     if not context:
-      return {
-        "error": "Context not found",
-        "code": "CONTEXT_NOT_FOUND",
-      }
+      status = EnvironmentStatus(
+        state="error",
+        error_message="Context not found",
+        error_code="CONTEXT_NOT_FOUND",
+      )
+      return status.to_dict()
 
     # Get environment state
     state_manager = StateManager(context_manager.state_dir)
     env_state = state_manager.get_environment(context.name)
 
     if not env_state:
-      return {
-        "name": context.name,
-        "state": "notfound",
-        "context_id": context.id,
-        "context_state": context.state,
-      }
+      status = EnvironmentStatus(
+        state="notfound",
+        context_name=context.name,
+        context_id=context.id,
+        context_state=context.state,
+      )
+      return status.to_dict()
 
     # Check actual container state
     try:
@@ -50,18 +54,24 @@ class EnvStatusCommand(PlumbingCommand):
 
       state = "running" if container_running else "stopped" if container_exists else "notfound"
 
-      return {
-        "name": context.name,
-        "container_id": env_state["container_id"],
-        "container_name": env_state["container_name"],
-        "state": state,
-        "context_id": context.id,
-        "context_state": context.state,
-        "created_at": env_state["created_at"],
-        "updated_at": env_state["updated_at"],
-      }
+      status = EnvironmentStatus(
+        state=state,
+        context_name=context.name,
+        container_id=env_state["container_id"],
+        container_name=env_state["container_name"],
+        context_id=context.id,
+        context_state=context.state,
+        created_at=env_state["created_at"],
+        updated_at=env_state["updated_at"],
+      )
+      return status.to_dict()
+
     except Exception as e:
-      return {
-        "error": str(e),
-        "code": "STATUS_FAILED",
-      }
+      status = EnvironmentStatus(
+        state="error",
+        context_name=context.name,
+        context_id=context.id,
+        error_message=str(e),
+        error_code="STATUS_FAILED",
+      )
+      return status.to_dict()

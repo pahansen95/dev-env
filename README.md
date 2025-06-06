@@ -66,17 +66,11 @@ python -m dev_env run pip install -r requirements.txt
 
 ## Core Commands
 
-### User Commands
-- `work` - Start or resume development session  
+- `work` - Start or resume development session
 - `stop` - Stop development environment
-- `status` - Show environment status (use `--all` for all environments)
-- `shell` - Open interactive shell in environment
 - `run` - Execute command in environment
-
-### Context Management
-- `context-create` - Create new development context
-- `context-resolve` - Resolve context from current directory
-- `context-list` - List all development contexts
+- `status` - Show environment status
+- `shell` - Open interactive shell
 
 ### Environment Control
 - `env-create` - Create environment from configuration

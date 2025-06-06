@@ -541,6 +541,23 @@ class DockerError(DevEnvError):
     )
 
 
+class ContextNotFoundError(DevEnvError):
+  """Context resolution errors"""
+
+  def __init__(self, context_name: str):
+    self.context_name = context_name
+    super().__init__(
+      f"Context '{context_name}' not found", f"Create the context: dev-env work --name {context_name}", exit_code=3
+    )
+
+
+class StateError(DevEnvError):
+  """State management errors"""
+
+  def __init__(self, message: str):
+    super().__init__(message, "Check state directory permissions and disk space", exit_code=5)
+
+
 # Compatibility aliases for old error names (for tests)
 def DockerNotAvailableError():
   return DockerError.daemon_unavailable()
@@ -568,6 +585,11 @@ def SSHNotEnabledError(env_name):
 
 def SecurityError(message):
   return ConfigError.security_violation(message)
+
+
+def ContextError(context_name):
+  """Compatibility alias for ContextNotFoundError"""
+  return ContextNotFoundError(context_name)
 
 
 # Forbidden mount paths for security

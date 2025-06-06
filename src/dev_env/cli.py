@@ -3,9 +3,11 @@
 import argparse
 import sys
 from pathlib import Path
+from typing import Optional
 
 from . import __version__
 from .utils import DevEnvError
+from .io import InputProvider, StdinInputProvider
 from .commands.plumbing.context_create import ContextCreateCommand
 from .commands.plumbing.context_resolve import ContextResolveCommand
 from .commands.plumbing.context_list import ContextListCommand
@@ -20,6 +22,44 @@ from .commands.porcelain.stop import StopCommand
 from .commands.porcelain.run import RunCommand
 from .commands.porcelain.status import StatusCommand
 from .commands.porcelain.shell import ShellCommand
+
+
+class CommandFactory:
+  """Factory for creating command instances with proper dependency injection."""
+
+  def __init__(self, input_provider: Optional[InputProvider] = None):
+    """Initialize command factory with optional input provider."""
+    self.input_provider = input_provider or StdinInputProvider()
+
+  def create_work_command(self) -> WorkCommand:
+    """Create WorkCommand with input provider."""
+    return WorkCommand(input_provider=self.input_provider)
+
+  def create_stop_command(self) -> StopCommand:
+    """Create StopCommand."""
+    return StopCommand()
+
+  def create_run_command(self) -> RunCommand:
+    """Create RunCommand."""
+    return RunCommand()
+
+  def create_status_command(self) -> StatusCommand:
+    """Create StatusCommand."""
+    return StatusCommand()
+
+  def create_shell_command(self) -> ShellCommand:
+    """Create ShellCommand."""
+    return ShellCommand()
+
+
+# Global command factory - can be overridden for testing
+_command_factory = CommandFactory()
+
+
+def set_command_factory(factory: CommandFactory) -> None:
+  """Set global command factory (primarily for testing)."""
+  global _command_factory
+  _command_factory = factory
 
 
 def main():
@@ -90,26 +130,26 @@ def main():
   # Ensure state directory exists
   args.state_dir.mkdir(parents=True, exist_ok=True)
 
-  # Porcelain command handlers
+  # Porcelain command handlers using factory
   porcelain_commands = {
-    "work": lambda args: WorkCommand().execute(args),
-    "stop": lambda args: StopCommand().execute(args),
-    "run": lambda args: RunCommand().execute(args),
-    "status": lambda args: StatusCommand().execute(args),
-    "shell": lambda args: ShellCommand().execute(args),
+    "work": _command_factory.create_work_command,
+    "stop": _command_factory.create_stop_command,
+    "run": _command_factory.create_run_command,
+    "status": _command_factory.create_status_command,
+    "shell": _command_factory.create_shell_command,
   }
 
-  # Plumbing command handlers
+  # Plumbing command handlers (no dependency injection needed)
   plumbing_commands = {
-    "context-create": lambda args: ContextCreateCommand().run(args),
-    "context-resolve": lambda args: ContextResolveCommand().run(args),
-    "context-list": lambda args: ContextListCommand().run(args),
-    "env-create": lambda args: EnvCreateCommand().run(args),
-    "env-start": lambda args: EnvStartCommand().run(args),
-    "env-stop": lambda args: EnvStopCommand().run(args),
-    "env-status": lambda args: EnvStatusCommand().run(args),
-    "plumbing-exec": lambda args: ExecCommand().run(args),
-    "plumbing-attach": lambda args: AttachCommand().run(args),
+    "context-create": ContextCreateCommand,
+    "context-resolve": ContextResolveCommand,
+    "context-list": ContextListCommand,
+    "env-create": EnvCreateCommand,
+    "env-start": EnvStartCommand,
+    "env-stop": EnvStopCommand,
+    "env-status": EnvStatusCommand,
+    "plumbing-exec": ExecCommand,
+    "plumbing-attach": AttachCommand,
   }
 
   try:
@@ -117,18 +157,26 @@ def main():
     if hasattr(args, "func"):
       return args.func(args)
 
+    # Special handling for run command where args.command is a list
+    if isinstance(args.command, list):
+      # The run command overwrites the subcommand name with its positional argument
+      command_name = "run"
+    else:
+      command_name = args.command
+
     # Check if it's a porcelain command
-    if args.command in porcelain_commands:
-      porcelain_commands[args.command](args)
-      return 0
+    if command_name in porcelain_commands:
+      command = porcelain_commands[command_name]()
+      return command.execute(args)
 
     # Check if it's a plumbing command
-    if args.command in plumbing_commands:
-      plumbing_commands[args.command](args)
+    if command_name in plumbing_commands:
+      command = plumbing_commands[command_name]()
+      command.run(args)
       return 0
 
     # Unknown command
-    print(f"Unknown command: {args.command}", file=sys.stderr)
+    print(f"Unknown command: {command_name}", file=sys.stderr)
     parser.print_help()
     return 1
   except DevEnvError as e:
